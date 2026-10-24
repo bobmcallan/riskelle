@@ -194,6 +194,54 @@ Every report records the riskelle version and the rules hash it was scored with.
   risk changes, alongside volume) is reported per period with the rules pinned
   for that period.
 
+### Azure DevOps
+
+[`ado/riskelle.yml`](ado/riskelle.yml) is a job template that scores every
+pull request with a released riskelle. Its parameters and the permissions it
+needs are documented in the template's header comments. To adopt it:
+
+1. Reference the template from your pipeline, at the same release tag you run.
+   Through a GitHub service connection (`riskelle-github` here):
+
+   ```yaml
+   resources:
+     repositories:
+       - repository: riskelle
+         type: github
+         endpoint: riskelle-github
+         name: bobmcallan/riskelle
+         ref: refs/tags/vX.Y.Z
+
+   jobs:
+     - template: ado/riskelle.yml@riskelle
+       parameters:
+         version: vX.Y.Z
+   ```
+
+   Or copy `ado/riskelle.yml` into your repository and use
+   `- template: ado/riskelle.yml` with the same `version` parameter.
+2. Make the pipeline run on pull requests: on Azure Repos, add it as a
+   **Build validation** policy on the target branch (the job is skipped on any
+   build that is not for a pull request).
+3. Grant the project's build service identity **Contribute to pull requests**
+   on the repository, so the job can post the status and the comment.
+
+Each pull request build then gives:
+
+- a PR status `riskelle/score` whose description carries the band and total
+  (`Low, 7/100`). It is `succeeded` for every band (riskelle measures, it does
+  not gate) and `error` when the change could not be scored;
+- one summary comment, the Markdown report, updated in place on every push;
+- the JSON report as the build artifact `riskelle`.
+
+The pipeline scores the PR's own head commit against its target branch tip,
+not the merge commit ADO builds, so the result is what you get locally. To
+reproduce it, run the same release with the `base` and `head` SHAs from the
+report: `riskelle score --base <base> --head <head>`.
+
+Self-hosted agents need Linux (amd64 or arm64) with bash, git, curl, jq, tar
+and sha256sum, as Microsoft-hosted Ubuntu agents have.
+
 ## Releasing
 
 A release is cut by pushing a `vX.Y.Z` tag on a commit on `main`:
