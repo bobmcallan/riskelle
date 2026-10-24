@@ -101,9 +101,10 @@ func TestCollectFactsFromAFixtureRepository(t *testing.T) {
 		`{"path":"notes/done/todo.md","old_path":"notes/todo.md","added":0,"removed":0},` +
 		`{"path":"pkg/a.go","added":1,"removed":1},` +
 		`{"path":"ui/app.js","added":1,"removed":0},` +
-		`{"path":"ui/icon.ico","added":0,"removed":0,"binary":true}],` +
+		`{"path":"ui/icon.ico","added":0,"removed":0,"binary":true,"new":true}],` +
 		`"directories":["notes","notes/done","pkg","ui"],` +
-		`"projects":[".","ui"]}`
+		`"projects":[".","ui"],` +
+		`"degree":{"existing":{"added":2,"removed":1},"new":{"added":0,"removed":0}}}`
 	if string(gotJSON) != want {
 		t.Errorf("facts JSON =\n%s\nwant\n%s", gotJSON, want)
 	}

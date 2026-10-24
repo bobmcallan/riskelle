@@ -68,6 +68,7 @@ func newFixture(t *testing.T) fixture {
 	write(t, dir, "app/main.go", "package main\n\nfunc main() { run() }\nfunc run() {}\n")
 	write(t, dir, "web/src/new.js", "a\nb\nc\nd\n")
 	write(t, dir, "bin/data.bin", "\x00\x01\x02\x03")
+	write(t, dir, "cli/run.go", "package cli\n\nfunc Run() {}\n")
 	if err := os.MkdirAll(filepath.Join(dir, "docs", "guide"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -99,14 +100,18 @@ func TestCollect(t *testing.T) {
 		Head:      f.feature,
 		Files: []File{
 			{Path: "app/main.go", Added: 2, Removed: 1},
-			{Path: "bin/data.bin", Binary: true},
+			{Path: "bin/data.bin", Binary: true, New: true},
+			{Path: "cli/run.go", Added: 3, New: true},
 			{Path: "docs/guide/new.md", OldPath: "docs/old.md", Added: 1},
 			{Path: "logo.png", Binary: true},
 			{Path: "svc/Program.cs", Removed: 3},
-			{Path: "web/src/new.js", Added: 4},
+			{Path: "web/src/new.js", Added: 4, New: true},
 		},
-		Directories: []string{".", "app", "bin", "docs", "docs/guide", "svc", "web/src"},
+		Directories: []string{".", "app", "bin", "cli", "docs", "docs/guide", "svc", "web/src"},
 		Projects:    []string{"app", "svc", "web"},
+		// Existing: app/main.go +2 -1, the renamed docs/guide/new.md +1 and
+		// the deleted svc/Program.cs -3. New: cli/run.go +3, web/src/new.js +4.
+		Degree: Degree{Existing: Lines{Added: 3, Removed: 4}, New: Lines{Added: 7}},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("Collect =\n%+v\nwant\n%+v", got, want)
@@ -139,6 +144,9 @@ func TestCollectIsDeterministic(t *testing.T) {
 	}
 	if !reflect.DeepEqual(first, third) {
 		t.Errorf("collection after config and worktree changes differs:\n%+v\n%+v", first, third)
+	}
+	if first.Degree == (Degree{}) || first.Degree != third.Degree {
+		t.Errorf("degree = %+v then %+v, want the same non-zero split", first.Degree, third.Degree)
 	}
 }
 
