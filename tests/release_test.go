@@ -29,6 +29,15 @@ var releaseTargets = []struct{ os, arch string }{
 	{"windows", "amd64"}, {"windows", "arm64"},
 }
 
+// snapshotGitConfig turns off git's automatic background work in a snapshot
+// repository: no auto maintenance or gc, and none detached if it runs anyway.
+var snapshotGitConfig = [][2]string{
+	{"maintenance.auto", "false"},
+	{"gc.auto", "0"},
+	{"maintenance.autoDetach", "false"},
+	{"gc.autoDetach", "false"},
+}
+
 // snapshotRepo copies the working tree's tracked and untracked (not ignored)
 // files into a fresh git repository with one commit, so the release script
 // runs on a clean tree holding exactly what would be committed. It returns
@@ -61,6 +70,13 @@ func snapshotRepo(t *testing.T) (dir, commit string) {
 		}
 	}
 	git(t, dir, "init", "--quiet")
+	// git commit starts auto maintenance detached, and it can still be
+	// writing .git/objects when t.TempDir removes the directory. Repo config
+	// keeps every later git in the snapshot (this helper, release.sh, go
+	// build's VCS stamping) from leaving work running in the background.
+	for _, kv := range snapshotGitConfig {
+		git(t, dir, "config", kv[0], kv[1])
+	}
 	git(t, dir, "add", ".")
 	git(t, dir, "-c", "user.name=test", "-c", "user.email=test@example.com",
 		"commit", "--quiet", "-m", "snapshot")
@@ -212,6 +228,42 @@ func TestReleaseScriptRejectsBadVersion(t *testing.T) {
 		var ee *exec.ExitError
 		if !errors.As(err, &ee) || ee.ExitCode() != 2 {
 			t.Errorf("scripts/release.sh %s: err %v, want exit code 2", v, err)
+		}
+	}
+}
+
+// TestSnapshotRepoRunsNoBackgroundGit checks the snapshot repository's
+// config stops git commit leaving a detached maintenance run behind.
+func TestSnapshotRepoRunsNoBackgroundGit(t *testing.T) {
+	repo, _ := snapshotRepo(t)
+	want := map[string]string{
+		"maintenance.auto":       "false",
+		"gc.auto":                "0",
+		"maintenance.autoDetach": "false",
+		"gc.autoDetach":          "false",
+	}
+	for key, value := range want {
+		if got := git(t, repo, "config", "--get", key); got != value {
+			t.Errorf("snapshot git config %s = %q, want %q", key, got, value)
+		}
+	}
+
+	// A further commit, traced, starts no child process at all: in
+	// particular not the detached "git maintenance run --auto".
+	trace := filepath.Join(t.TempDir(), "trace.json")
+	cmd := exec.Command("git", "-C", repo, "-c", "user.name=test", "-c", "user.email=test@example.com",
+		"commit", "--quiet", "--allow-empty", "-m", "traced")
+	cmd.Env = append(os.Environ(), "GIT_TRACE2_EVENT="+trace)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git commit: %v\n%s", err, out)
+	}
+	events, err := os.ReadFile(trace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range strings.Split(string(events), "\n") {
+		if strings.Contains(line, `"event":"child_start"`) {
+			t.Errorf("git commit in the snapshot started a child process: %s", line)
 		}
 	}
 }
