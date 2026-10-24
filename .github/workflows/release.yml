@@ -1,0 +1,51 @@
+name: release
+
+on:
+  push:
+    tags: ['v[0-9]+.[0-9]+.[0-9]+']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      # HEAD, not GITHUB_SHA: on an annotated tag push GITHUB_SHA can name the
+      # tag object, which merge-base rejects. Checkout has peeled it to HEAD.
+      - name: tag must be on main
+        run: |
+          git merge-base --is-ancestor HEAD origin/main || {
+            echo "::error::$GITHUB_REF_NAME is not on main"
+            exit 1
+          }
+      - name: test
+        run: go test ./...
+      - name: build archives
+        run: scripts/release.sh "$GITHUB_REF_NAME" dist
+      - name: release binary reports the tag
+        run: |
+          tmp=$(mktemp -d)
+          tar -xzf "dist/riskelle_${GITHUB_REF_NAME}_linux_amd64.tar.gz" -C "$tmp"
+          got=$("$tmp/riskelle_${GITHUB_REF_NAME}_linux_amd64/riskelle" version)
+          echo "$got"
+          case "$got" in
+            "riskelle ${GITHUB_REF_NAME} (commit "*) ;;
+            *) echo "::error::release binary reports '$got'"; exit 1 ;;
+          esac
+      - name: publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --title "$GITHUB_REF_NAME" --verify-tag --generate-notes
