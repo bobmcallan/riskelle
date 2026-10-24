@@ -29,9 +29,11 @@ var releaseTargets = []struct{ os, arch string }{
 	{"windows", "amd64"}, {"windows", "arm64"},
 }
 
-// snapshotGitConfig turns off git's automatic background work in a snapshot
-// repository: no auto maintenance or gc, and none detached if it runs anyway.
-var snapshotGitConfig = [][2]string{
+// quietGitConfig turns off git's automatic background work (auto maintenance
+// and gc, and their detaching) in every repository the tests build:
+// snapshotRepo writes it into the repository's config, and fixtureGitAt passes
+// it on each git it runs.
+var quietGitConfig = [][2]string{
 	{"maintenance.auto", "false"},
 	{"gc.auto", "0"},
 	{"maintenance.autoDetach", "false"},
@@ -74,7 +76,7 @@ func snapshotRepo(t *testing.T) (dir, commit string) {
 	// writing .git/objects when t.TempDir removes the directory. Repo config
 	// keeps every later git in the snapshot (this helper, release.sh, go
 	// build's VCS stamping) from leaving work running in the background.
-	for _, kv := range snapshotGitConfig {
+	for _, kv := range quietGitConfig {
 		git(t, dir, "config", kv[0], kv[1])
 	}
 	git(t, dir, "add", ".")

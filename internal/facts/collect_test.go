@@ -17,6 +17,18 @@ type fixture struct {
 	baseCommit, feature, tip string
 }
 
+// quietGitConfig turns off git's automatic background work (auto
+// maintenance and gc, and their detaching) in every fixture repository:
+// runGitAt passes it on each git it runs. Otherwise git commit leaves a
+// detached "git maintenance run --auto" writing under .git while t.TempDir
+// removes the fixture.
+var quietGitConfig = [][2]string{
+	{"maintenance.auto", "false"},
+	{"gc.auto", "0"},
+	{"maintenance.autoDetach", "false"},
+	{"gc.autoDetach", "false"},
+}
+
 func runGit(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	return runGitAt(t, dir, "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z", args...)
@@ -26,7 +38,11 @@ func runGit(t *testing.T, dir string, args ...string) string {
 // out, recording the given author and committer dates on any commit it makes.
 func runGitAt(t *testing.T, dir, authorDate, committerDate string, args ...string) string {
 	t.Helper()
-	cmd := exec.Command("git", append([]string{"-C", dir, "-c", "commit.gpgsign=false"}, args...)...)
+	argv := []string{"-C", dir, "-c", "commit.gpgsign=false"}
+	for _, kv := range quietGitConfig {
+		argv = append(argv, "-c", kv[0]+"="+kv[1])
+	}
+	cmd := exec.Command("git", append(argv, args...)...)
 	cmd.Env = append(os.Environ(),
 		"GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_CONFIG_NOSYSTEM=1",
 		"GIT_AUTHOR_NAME=Fixture", "GIT_AUTHOR_EMAIL=fixture@example.com",
@@ -199,5 +215,36 @@ func TestCollectSameRef(t *testing.T) {
 	}
 	if got.BranchAgeDays != 0 || got.TrunkCommits != 0 {
 		t.Errorf("Collect(feature, feature) age, drift = %d, %d, want 0, 0", got.BranchAgeDays, got.TrunkCommits)
+	}
+}
+
+// TestRunGitStartsNoBackgroundGit checks a commit made through runGit, in a
+// fixture repository, starts no child process at all: in particular not the
+// detached "git maintenance run --auto" that can outlive the test.
+func TestRunGitStartsNoBackgroundGit(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	dir := t.TempDir()
+	runGit(t, dir, "init", "--quiet", "--initial-branch=main")
+	write(t, dir, "a.txt", "a\n")
+	runGit(t, dir, "add", "a.txt")
+	runGit(t, dir, "commit", "--quiet", "-m", "base")
+
+	trace := filepath.Join(t.TempDir(), "trace.json")
+	t.Setenv("GIT_TRACE2_EVENT", trace)
+	runGit(t, dir, "commit", "--quiet", "--allow-empty", "-m", "traced")
+
+	events, err := os.ReadFile(trace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) == 0 {
+		t.Fatal("git wrote an empty trace; nothing was proved")
+	}
+	for _, line := range strings.Split(string(events), "\n") {
+		if strings.Contains(line, `"event":"child_start"`) {
+			t.Errorf("git commit in the fixture started a child process: %s", line)
+		}
 	}
 }
