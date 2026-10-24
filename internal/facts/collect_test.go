@@ -107,6 +107,17 @@ func TestCollect(t *testing.T) {
 		},
 		Directories: []string{".", "app", "bin", "docs", "docs/guide", "svc", "web/src"},
 		Projects:    []string{"app", "svc", "web"},
+		Impact: Impact{
+			Packages: []Dependency{{Name: "app", Dependents: 0}},
+			Files: []Dependency{
+				{Name: "bin/data.bin"},
+				{Name: "docs/guide/new.md"},
+				{Name: "docs/old.md"},
+				{Name: "logo.png"},
+				{Name: "svc/Program.cs"},
+				{Name: "web/src/new.js"},
+			},
+		},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("Collect =\n%+v\nwant\n%+v", got, want)
@@ -157,7 +168,9 @@ func TestCollectSameRef(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got.Files == nil || got.Directories == nil || got.Projects == nil ||
-		len(got.Files)+len(got.Directories)+len(got.Projects) != 0 {
+		got.Impact.Packages == nil || got.Impact.Files == nil ||
+		len(got.Files)+len(got.Directories)+len(got.Projects)+
+			len(got.Impact.Packages)+len(got.Impact.Files) != 0 {
 		t.Errorf("Collect(feature, feature) = %+v, want empty non-nil slices", got)
 	}
 }

@@ -27,6 +27,22 @@ type Facts struct {
 	Files       []File   `json:"files"`
 	Directories []string `json:"directories"`
 	Projects    []string `json:"projects"`
+	Impact      Impact   `json:"impact"`
+}
+
+// Impact lists each changed Go package and each changed non-Go file with how
+// many places at head depend on it. Both slices are sorted by Name and
+// non-nil.
+type Impact struct {
+	Packages []Dependency `json:"packages"` // Name is the Go import path
+	Files    []Dependency `json:"files"`    // Name is the repo-relative path
+}
+
+// Dependency is one changed package or file and the number of distinct
+// dependents it has at head.
+type Dependency struct {
+	Name       string `json:"name"`
+	Dependents int    `json:"dependents"`
 }
 
 // IsManifest reports whether a file's base name marks its directory as a
