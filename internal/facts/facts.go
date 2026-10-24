@@ -16,6 +16,7 @@ type File struct {
 	Added   int     `json:"added"`
 	Removed int     `json:"removed"`
 	Binary  bool    `json:"binary,omitempty"`  // git reported no line counts; Added and Removed are 0
+	New     bool    `json:"new,omitempty"`     // absent at the merge base; every line in Added is new code
 	Classes []Class `json:"classes,omitempty"` // path classes from Classify; nil when none
 }
 
@@ -28,6 +29,7 @@ type Facts struct {
 	Files       []File   `json:"files"`
 	Directories []string `json:"directories"`
 	Projects    []string `json:"projects"`
+	Degree      Degree   `json:"degree"` // lines in files that existed at the merge base against lines in new files
 }
 
 // IsManifest reports whether a file's base name marks its directory as a
