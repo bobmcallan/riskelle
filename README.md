@@ -83,6 +83,33 @@ Every report records the riskelle version and the rules hash it was scored with.
   risk changes, alongside volume) is reported per period with the rules pinned
   for that period.
 
+## Releasing
+
+A release is cut by pushing a `vX.Y.Z` tag on a commit on `main`:
+
+```sh
+git tag -a vX.Y.Z origin/main -m vX.Y.Z
+git push origin vX.Y.Z
+```
+
+The tag runs `.github/workflows/release.yml`. It builds every target with
+`scripts/release.sh` (the owner of the target list and archive layout), checks
+that the linux/amd64 binary reports the tag as its version, and attaches the
+archives and `riskelle_vX.Y.Z_checksums.txt` to a GitHub Release named after
+the tag. A tag whose commit is not on `main` fails the run. A pushed tag is
+never moved: a broken release is fixed forward with the next patch version.
+
+Verify a download:
+
+```sh
+sha256sum -c --ignore-missing riskelle_vX.Y.Z_checksums.txt
+```
+
+Reproduce a release on Linux: `git checkout vX.Y.Z && scripts/release.sh vX.Y.Z /tmp/out`,
+then compare the checksums file with the one on the Release. The Go toolchain
+is pinned by `go.mod` and every timestamp is the commit time, so the archives
+match byte for byte.
+
 ## Status
 
 Starting point. The design is carried over from a Python scorer running in
