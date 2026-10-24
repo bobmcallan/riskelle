@@ -29,20 +29,24 @@ const (
 // Point is one entry of the breakdown: the band one fact of one measure fell
 // in, and the facts that produced it.
 type Point struct {
-	Measure  string   `json:"measure"`            // "size" or "spread"
-	Fact     string   `json:"fact"`               // "lines", "files", "directories" or "projects"
+	Measure  string   `json:"measure"`            // "size", "spread" or "impact"
+	Fact     string   `json:"fact"`               // "lines", "files", "directories", "projects" or "dependents"
 	Value    int      `json:"value"`              // the fact's value
 	Min      int      `json:"min"`                // lower edge of the band it fell in
 	Points   int      `json:"points"`             // the band's points
 	From     []string `json:"from"`               // paths, directories or projects counted; sorted, non-nil
-	Excluded []string `json:"excluded,omitempty"` // size only: paths left out by class; sorted
+	Excluded []string `json:"excluded,omitempty"` // size and impact: paths left out by class; sorted
+
+	// Impact only: each counted package or file and its dependent count,
+	// sorted by name.
+	Dependents []facts.Dependency `json:"dependents,omitempty"`
 }
 
 // Result is a scored change.
 type Result struct {
 	Total     int     `json:"total"` // 0-100
 	Level     Level   `json:"level"`
-	Breakdown []Point `json:"breakdown"` // size/lines, then spread/files, directories, projects
+	Breakdown []Point `json:"breakdown"` // size/lines, spread/files, directories, projects, then impact/dependents
 }
 
 // Score scores the facts of one change against rules. Every breakdown entry is
@@ -57,6 +61,7 @@ func Score(f facts.Facts, r Rules) Result {
 		point(MeasureSpread, "files", paths, r.SpreadFiles),
 		point(MeasureSpread, "directories", f.Directories, r.SpreadDirs),
 		point(MeasureSpread, "projects", f.Projects, r.SpreadProjs),
+		impact(f, r),
 	}
 
 	total := 0

@@ -218,7 +218,7 @@ func TestBreakdownNamesMeasureAndFacts(t *testing.T) {
 			t.Errorf("entry %+v lacks a measure, fact or from list", p)
 		}
 	}
-	want := [][2]string{{"size", "lines"}, {"spread", "files"}, {"spread", "directories"}, {"spread", "projects"}}
+	want := [][2]string{{"size", "lines"}, {"spread", "files"}, {"spread", "directories"}, {"spread", "projects"}, {"impact", "dependents"}}
 	if !reflect.DeepEqual(order, want) {
 		t.Errorf("breakdown order %v, want %v", order, want)
 	}
@@ -236,7 +236,8 @@ func TestBreakdownNamesMeasureAndFacts(t *testing.T) {
 	if size.Value != lines || size.Value != 275 || size.Min != 201 || size.Points != 10 {
 		t.Errorf("size = %+v, want 275 lines from its files, band 201 for 10 points", size)
 	}
-	for _, p := range r.Breakdown[1:] {
+	// Spread only: impact values a count of dependents, not of names.
+	for _, p := range r.Breakdown[1:4] {
 		if p.Value != len(p.From) {
 			t.Errorf("%s/%s value %d, want len(from) %d", p.Measure, p.Fact, p.Value, len(p.From))
 		}

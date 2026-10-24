@@ -17,6 +17,7 @@ func TestDefaultRulesValid(t *testing.T) {
 	for name, bands := range map[string]Bands{
 		"size_lines": r.SizeLines, "spread_files": r.SpreadFiles,
 		"spread_directories": r.SpreadDirs, "spread_projects": r.SpreadProjs,
+		"impact_dependents": r.ImpactDependents,
 	} {
 		if len(bands) == 0 || bands[0] != (Band{0, 0}) {
 			t.Errorf("%s must start at {0 0}: %v", name, bands)

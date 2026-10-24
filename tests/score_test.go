@@ -57,7 +57,9 @@ func TestScoreCollectedFacts(t *testing.T) {
 
 	// size: 120+30+60 = 210 lines -> band 201, 10 points.
 	// spread: 6 files -> 2, 5 directories (., api, core, docs, ui) -> 4,
-	// 2 projects (., ui) -> 3. Total 19: Low.
+	// 2 projects (., ui) -> 3. impact: nothing depends on the changed
+	// packages or ui/app.js -> 0; the doc and lock file are left out, and
+	// api/svc.pb.go counts as its package. Total 19: Low.
 	want := `{"total":19,"level":"Low","breakdown":[` +
 		`{"measure":"size","fact":"lines","value":210,"min":201,"points":10,` +
 		`"from":["core/calc.go","core/calc_test.go","ui/app.js"],` +
@@ -66,7 +68,11 @@ func TestScoreCollectedFacts(t *testing.T) {
 		`"from":["api/svc.pb.go","core/calc.go","core/calc_test.go","docs/guide.md","go.sum","ui/app.js"]},` +
 		`{"measure":"spread","fact":"directories","value":5,"min":5,"points":4,` +
 		`"from":[".","api","core","docs","ui"]},` +
-		`{"measure":"spread","fact":"projects","value":2,"min":2,"points":3,"from":[".","ui"]}]}`
+		`{"measure":"spread","fact":"projects","value":2,"min":2,"points":3,"from":[".","ui"]},` +
+		`{"measure":"impact","fact":"dependents","value":0,"min":0,"points":0,` +
+		`"from":["example.com/m/api","example.com/m/core","ui/app.js"],` +
+		`"excluded":["docs/guide.md","go.sum"],` +
+		`"dependents":[{"name":"example.com/m/api","dependents":0},{"name":"example.com/m/core","dependents":0},{"name":"ui/app.js","dependents":0}]}]}`
 	if runs[0] != want {
 		t.Errorf("score =\n%s\nwant\n%s", runs[0], want)
 	}
