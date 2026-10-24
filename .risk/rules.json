@@ -1,0 +1,18 @@
+{
+  "generated": [
+    "internal/report/testdata/**"
+  ],
+  "areas": {
+    "release": [
+      ".github/workflows/**",
+      "action.yml",
+      "ado/**",
+      "scripts/release.sh"
+    ],
+    "scoring": [
+      "internal/facts/**",
+      "internal/rules/**",
+      "internal/score/**"
+    ]
+  }
+}
