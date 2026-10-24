@@ -40,8 +40,10 @@ func TestScoreCollectedFacts(t *testing.T) {
 	t.Chdir(t.TempDir())
 	ctx := context.Background()
 	var runs []string
+	var f facts.Facts
 	for i := 0; i < 2; i++ {
-		f, err := facts.Collect(ctx, dir, "main", "topic")
+		var err error
+		f, err = facts.Collect(ctx, dir, "main", "topic")
 		if err != nil {
 			t.Fatalf("Collect: %v", err)
 		}
@@ -57,7 +59,9 @@ func TestScoreCollectedFacts(t *testing.T) {
 
 	// size: 120+30+60 = 210 lines -> band 201, 10 points.
 	// spread: 6 files -> 2, 5 directories (., api, core, docs, ui) -> 4,
-	// 2 projects (., ui) -> 3. Total 19: Low.
+	// 2 projects (., ui) -> 3. Every file is new, so degree is 0; the trunk
+	// did not move and the branch's one commit is its first, so branch age
+	// is 0; core/calc_test.go is a test change, so tests is 0. Total 19: Low.
 	want := `{"total":19,"level":"Low","breakdown":[` +
 		`{"measure":"size","fact":"lines","value":210,"min":201,"points":10,` +
 		`"from":["core/calc.go","core/calc_test.go","ui/app.js"],` +
@@ -66,7 +70,11 @@ func TestScoreCollectedFacts(t *testing.T) {
 		`"from":["api/svc.pb.go","core/calc.go","core/calc_test.go","docs/guide.md","go.sum","ui/app.js"]},` +
 		`{"measure":"spread","fact":"directories","value":5,"min":5,"points":4,` +
 		`"from":[".","api","core","docs","ui"]},` +
-		`{"measure":"spread","fact":"projects","value":2,"min":2,"points":3,"from":[".","ui"]}]}`
+		`{"measure":"spread","fact":"projects","value":2,"min":2,"points":3,"from":[".","ui"]},` +
+		`{"measure":"degree","fact":"existing_lines","value":0,"min":0,"points":0,"from":[]},` +
+		fmt.Sprintf(`{"measure":"branch_age","fact":"days","value":0,"min":0,"points":0,"from":["%s..%s"]},`, f.MergeBase, f.Head) +
+		fmt.Sprintf(`{"measure":"branch_age","fact":"trunk_commits","value":0,"min":0,"points":0,"from":["%s..%s"]},`, f.MergeBase, f.Base) +
+		`{"measure":"tests","fact":"untested_production_files","value":0,"min":0,"points":0,"from":[]}]}`
 	if runs[0] != want {
 		t.Errorf("score =\n%s\nwant\n%s", runs[0], want)
 	}

@@ -40,7 +40,13 @@ type Rules struct {
 	SpreadFiles  Bands         `json:"spread_files"`
 	SpreadDirs   Bands         `json:"spread_directories"`
 	SpreadProjs  Bands         `json:"spread_projects"`
-	Levels       []LevelEdge   `json:"levels"` // ascending, the first at Min 0
+
+	DegreeExisting     Bands `json:"degree_existing_lines"` // lines added and removed in files that existed at the merge base
+	BranchAgeDays      Bands `json:"branch_age_days"`
+	BranchTrunkCommits Bands `json:"branch_trunk_commits"`
+	TestsUntested      Bands `json:"tests_untested"` // production files changed with no test change
+
+	Levels []LevelEdge `json:"levels"` // ascending, the first at Min 0
 }
 
 // Default returns riskelle's built-in rules: compiled into the binary and
@@ -49,8 +55,8 @@ type Rules struct {
 //
 // The bands and level edges are provisional until they are calibrated from
 // real merge history (sty_62b9ea06). The highest band of every measure must
-// sum to 100 or less; size and spread take at most 50, leaving the rest for
-// degree, impact, branch age and tests.
+// sum to 100 or less: size and spread take at most 50, degree 15, branch age
+// 15 (days 10, trunk commits 5) and tests 10, leaving 10 for impact.
 func Default() Rules {
 	return Rules{
 		SizeExcludes: []facts.Class{facts.ClassDocs, facts.ClassGenerated, facts.ClassLock},
@@ -58,6 +64,12 @@ func Default() Rules {
 		SpreadFiles:  Bands{{0, 0}, {6, 2}, {11, 4}, {16, 8}},
 		SpreadDirs:   Bands{{0, 0}, {3, 2}, {5, 4}, {9, 6}},
 		SpreadProjs:  Bands{{0, 0}, {2, 3}, {3, 6}},
-		Levels:       []LevelEdge{{0, Low}, {20, Medium}, {40, High}},
+
+		DegreeExisting:     Bands{{0, 0}, {26, 2}, {101, 5}, {251, 10}, {501, 15}},
+		BranchAgeDays:      Bands{{0, 0}, {3, 3}, {8, 6}, {15, 10}},
+		BranchTrunkCommits: Bands{{0, 0}, {11, 2}, {51, 3}, {101, 5}},
+		TestsUntested:      Bands{{0, 0}, {1, 10}},
+
+		Levels: []LevelEdge{{0, Low}, {20, Medium}, {40, High}},
 	}
 }
