@@ -21,6 +21,9 @@ func TestRun(t *testing.T) {
 		{"--help", []string{"--help"}, 0, "usage", ""},
 		{"unknown command", []string{"bogus"}, 2, "", `unknown command "bogus"`},
 		{"version with arguments", []string{"version", "extra"}, 2, "", "takes no arguments"},
+		{"estimate without a plan", []string{"estimate"}, 2, "", "usage"},
+		{"estimate with two plans", []string{"estimate", "a.json", "b.json"}, 2, "", "one plan file"},
+		{"estimate with a missing plan", []string{"estimate", "no-such-plan.json"}, 1, "", "no-such-plan.json"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

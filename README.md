@@ -55,6 +55,44 @@ The same scorer runs over two sources of facts:
   while working to bring the score down, and in CI on every pull request (or
   push) as the official figure.
 
+### Plan file
+
+`riskelle estimate plan.json`, run in the repository the change targets, reads
+a JSON plan file that predicts the change:
+
+```json
+{
+  "target": "main",
+  "branch_age_days": 1,
+  "files": [
+    {"path": "internal/facts/plan.go", "added": 110},
+    {"path": "cmd/riskelle/main.go", "added": 40, "removed": 2},
+    {"path": "internal/facts/plan_test.go", "added": 95}
+  ]
+}
+```
+
+- `target` (required): the branch the change will merge into. Its tree says
+  which planned paths are new (new files, and so new packages), holds the
+  project manifests, and is where impact is counted and `.risk/rules.json` is
+  read, as for a real score.
+- `files` (required, not empty): every path the change will touch, each listed
+  once, repo-relative, slash-separated and clean (no leading `/`, no `..`).
+  - `added`, `removed`: expected line counts, non-negative. At least one must
+    be given; an absent one is 0.
+  - Planned tests are the test files listed (they are classed from the path,
+    as in a real diff).
+  - A move is its old path with the removed lines plus its new path with the
+    added lines.
+- `branch_age_days` (optional, default 0, non-negative): the expected days
+  from the branch's first commit to merge.
+
+Any other field is refused. Trunk drift cannot be planned and is 0. A plan
+that is invalid or incomplete is refused with every problem named, exit code 1.
+
+It prints the same scored result as a real score, marked `"kind": "estimate"`
+and naming the plan file in `"plan"`.
+
 With [satelle](https://github.com/bobmcallan/satelle), the estimate and the
 actual are recorded on the story, so the developer and the agent work the
 number down together, and a plan reviewer can send a high estimate back to be
