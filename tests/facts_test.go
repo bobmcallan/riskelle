@@ -111,6 +111,11 @@ func TestCollectFactsFromAFixtureRepository(t *testing.T) {
 		`"directories":["notes","notes/done","pkg","ui"],` +
 		`"projects":[".","ui"],` +
 		`"degree":{"existing":{"added":2,"removed":1},"new":{"added":0,"removed":0}},` +
+		`"impact":{"packages":[{"name":"example.com/m/pkg","dependents":0}],` +
+		`"files":[{"name":"notes/done/todo.md","dependents":0},` +
+		`{"name":"notes/todo.md","dependents":0},` +
+		`{"name":"ui/app.js","dependents":0},` +
+		`{"name":"ui/icon.ico","dependents":0}]},` +
 		`"branch_age_days":0,"trunk_commits":1}`
 	if string(gotJSON) != want {
 		t.Errorf("facts JSON =\n%s\nwant\n%s", gotJSON, want)
@@ -132,7 +137,8 @@ func TestCollectFactsOfAnEmptyChange(t *testing.T) {
 		t.Fatalf("Collect: %v", err)
 	}
 	b, _ := json.Marshal(got)
-	if s := string(b); !strings.Contains(s, `"files":[],"directories":[],"projects":[]`) {
+	if s := string(b); !strings.Contains(s, `"files":[],"directories":[],"projects":[],`) ||
+		!strings.Contains(s, `"impact":{"packages":[],"files":[]}`) {
 		t.Errorf("facts JSON = %s, want empty lists", s)
 	}
 	if s := string(b); !strings.Contains(s, `"branch_age_days":0,"trunk_commits":0`) {

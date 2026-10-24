@@ -78,6 +78,10 @@ func Collect(ctx context.Context, repo, base, head string) (Facts, error) {
 			touched = append(touched, f.OldPath)
 		}
 	}
+	impact, err := CollectImpact(ctx, repo, headSHA, touched)
+	if err != nil {
+		return Facts{}, err
+	}
 	return Facts{
 		Base:        baseSHA,
 		MergeBase:   mergeBase,
@@ -86,6 +90,7 @@ func Collect(ctx context.Context, repo, base, head string) (Facts, error) {
 		Directories: Directories(touched),
 		Projects:    Projects(touched, sorted(roots)),
 		Degree:      DegreeOf(files),
+		Impact:      impact,
 
 		BranchAgeDays: age,
 		TrunkCommits:  drift,

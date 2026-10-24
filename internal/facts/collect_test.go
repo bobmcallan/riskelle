@@ -122,6 +122,20 @@ func TestCollect(t *testing.T) {
 		// the deleted svc/Program.cs -3. New: cli/run.go +3, web/src/new.js +4,
 		// web/src/new.test.js +1.
 		Degree: Degree{Existing: Lines{Added: 3, Removed: 4}, New: Lines{Added: 8}},
+		// cli/run.go is under no go.mod, so it is a file, not a package.
+		Impact: Impact{
+			Packages: []Dependency{{Name: "app", Dependents: 0}},
+			Files: []Dependency{
+				{Name: "bin/data.bin"},
+				{Name: "cli/run.go"},
+				{Name: "docs/guide/new.md"},
+				{Name: "docs/old.md"},
+				{Name: "logo.png"},
+				{Name: "svc/Program.cs"},
+				{Name: "web/src/new.js"},
+				{Name: "web/src/new.test.js"},
+			},
+		},
 
 		BranchAgeDays: 0, // every fixture commit is dated 2026-01-01
 		TrunkCommits:  1, // the "trunk" commit on main after the branch point
@@ -178,7 +192,9 @@ func TestCollectSameRef(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got.Files == nil || got.Directories == nil || got.Projects == nil ||
-		len(got.Files)+len(got.Directories)+len(got.Projects) != 0 {
+		got.Impact.Packages == nil || got.Impact.Files == nil ||
+		len(got.Files)+len(got.Directories)+len(got.Projects)+
+			len(got.Impact.Packages)+len(got.Impact.Files) != 0 {
 		t.Errorf("Collect(feature, feature) = %+v, want empty non-nil slices", got)
 	}
 	if got.BranchAgeDays != 0 || got.TrunkCommits != 0 {
