@@ -181,7 +181,9 @@ line it leaves for reviewers, is in the skill file itself.
   areas). It is read from the **target branch**, so a change cannot alter its
   own rules. Anything that would lower a score is refused by name. A change
   that edits `.risk/` is scored like any other change: riskelle does not try
-  to guard against a dishonest developer.
+  to guard against a dishonest developer. riskelle's own
+  [`.risk/rules.json`](.risk/rules.json) is an example: it adds areas for the
+  scorer and the release pipelines, and marks the report goldens generated.
 
 Every report records the riskelle version and the rules hash it was scored with.
 
