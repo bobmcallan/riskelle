@@ -13,7 +13,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/bobmcallan/riskelle/internal/facts"
@@ -29,14 +31,46 @@ const Path = ".risk/rules.json"
 const SourceBuiltin = "built-in"
 
 // File is what .risk/rules.json may hold: additions to the built-in rules
-// only. No field replaces a built-in setting.
+// only. No field replaces a built-in setting; a key naming one is refused by
+// name (see Parse).
 type File struct {
 	Generated []string `json:"generated"` // extra generated-path globs in the built-in syntax; size leaves them out
 }
 
-// Parse decodes a rules file strictly: an unknown key, trailing data or an
-// invalid pattern is an error, so no setting is silently ignored.
+// refused holds the lower-cased JSON keys of the built-in settings that File
+// does not add to: bands, level edges and exclusion classes. Replacing any of
+// them could lower a score, so .risk/rules.json may not set them. It is
+// derived from score.Rules, so a built-in setting added later is refused too.
+var refused = func() map[string]bool {
+	m := map[string]bool{}
+	for _, k := range jsonKeys(reflect.TypeFor[score.Rules]()) {
+		m[strings.ToLower(k)] = true
+	}
+	for _, k := range jsonKeys(reflect.TypeFor[File]()) {
+		delete(m, strings.ToLower(k))
+	}
+	return m
+}()
+
+// jsonKeys returns the JSON names of a struct type's tagged fields.
+func jsonKeys(t reflect.Type) []string {
+	var keys []string
+	for f := range t.Fields() {
+		name, _, _ := strings.Cut(f.Tag.Get("json"), ",")
+		if name != "" && name != "-" {
+			keys = append(keys, name)
+		}
+	}
+	return keys
+}
+
+// Parse decodes a rules file strictly: a key naming a built-in setting is
+// refused by name, and an unknown key, trailing data or an invalid pattern is
+// an error, so no setting is silently ignored.
 func Parse(data []byte) (File, error) {
+	if err := refuse(data); err != nil {
+		return File{}, err
+	}
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.DisallowUnknownFields()
 	var f File
@@ -55,6 +89,29 @@ func Parse(data []byte) (File, error) {
 		}
 	}
 	return f, nil
+}
+
+// refuse returns an error naming, in sorted order, every top-level key of
+// data that would replace a built-in setting. Keys match case-insensitively,
+// as encoding/json matches fields. Data that is not a JSON object is left to
+// Parse's strict decode to report.
+func refuse(data []byte) error {
+	var obj map[string]json.RawMessage
+	if json.NewDecoder(bytes.NewReader(data)).Decode(&obj) != nil {
+		return nil
+	}
+	var names []string
+	for k := range obj {
+		if refused[strings.ToLower(k)] {
+			names = append(names, strconv.Quote(k))
+		}
+	}
+	if len(names) == 0 {
+		return nil
+	}
+	slices.Sort(names)
+	return fmt.Errorf("refused %s: %s may only add risk or context; these would replace built-in settings and could lower a score",
+		strings.Join(names, ", "), Path)
 }
 
 // Apply returns r with the file's additions merged in: Generated becomes the

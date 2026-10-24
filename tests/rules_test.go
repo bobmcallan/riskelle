@@ -126,3 +126,26 @@ func TestRulesInvalidFileFails(t *testing.T) {
 		t.Errorf("rules.Score error = %v, want one naming .risk/rules.json and %s", err, f.Base)
 	}
 }
+
+// TestRulesLoweringSettingRefused: the target branch's .risk/rules.json
+// beside an additive generated path tries to replace the built-in size bands,
+// which could lower a score. The run fails naming the file, the commit and
+// the refused setting, and yields no result.
+func TestRulesLoweringSettingRefused(t *testing.T) {
+	dir := rulesFixture(t,
+		map[string]string{".risk/rules.json": `{"generated":["gen/**"],"size_lines":[{"min":0,"points":0}]}` + "\n"},
+		map[string]string{"src/app.go": numbered("package src // ", 100)})
+
+	f, res, err := collectAndScore(t, dir)
+	if err == nil {
+		t.Fatalf("rules.Score = %+v, want the lowering setting refused", res)
+	}
+	for _, want := range []string{".risk/rules.json", f.Base, `refused "size_lines"`, "could lower a score"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("rules.Score error = %v, want it to contain %q", err, want)
+		}
+	}
+	if !reflect.DeepEqual(res, score.Result{}) {
+		t.Errorf("result = %+v, want none", res)
+	}
+}
