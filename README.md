@@ -106,10 +106,70 @@ under `"context"` (JSON) or "Where it lands (context, not scored)" (Markdown),
 labelled as context that does not count towards the score. The same result
 always prints the same bytes.
 
-With [satelle](https://github.com/bobmcallan/satelle), the estimate and the
-actual are recorded on the story, so the developer and the agent work the
-number down together, and a plan reviewer can send a high estimate back to be
-split.
+## With satelle
+
+With [satelle](https://github.com/bobmcallan/satelle), a story carries its
+riskelle estimate from planning, which the developer and the agent work down,
+and its actual score from the real diff; a High estimate is sent back to be
+split. riskelle itself knows nothing of satelle: the wiring below is a few
+shell commands (they need `jq`) and one coded satelle gate.
+
+**Install.** Copy `integrations/satelle/riskelle-risk-review.md` into the
+repo's `.satelle/skills/`, then add its gate to the workflow beside satelle's
+own `satelle-estimate-actual-review` gate (keep that one too):
+
+```toml
+[[gate]]
+skill = "riskelle-risk-review"
+on = ["in_progress", "<last state before the branch lands>", "done"]
+for = ["*"]
+```
+
+and run `satelle workflow validate`.
+
+**Tags.** The figures sit in the story's tags, next to satelle's own
+`estimate-*` and `actual-*`:
+
+| Tag | Holds |
+| --- | --- |
+| `estimate-risk:<total>` | the estimate's total, 0-100 |
+| `estimate-risk-level:<level>` | the estimate's level: low, medium or high |
+| `actual-risk:<total>` | the real diff's total, 0-100 |
+| `actual-risk-level:<level>` | the real diff's level |
+
+**Estimate at planning**, before requesting `plan → in_progress` (re-run it
+whenever the plan changes; it replaces the previous figure):
+
+```sh
+riskelle estimate plan.json > risk-estimate.json
+satelle story set <id> --remove-tags estimate-risk:,estimate-risk-level:
+satelle story set <id> --add-tags "estimate-risk:$(jq .total risk-estimate.json),estimate-risk-level:$(jq -r '.level|ascii_downcase' risk-estimate.json)"
+satelle story attach <id> --name risk-estimate --type output --file risk-estimate.json
+```
+
+**Actual before it lands**, in the story's tree, before the branch merges into
+the target (once it has landed, the merge base is the head and the diff is
+empty):
+
+```sh
+riskelle score --base <target> --head HEAD > risk-actual.json
+satelle story set <id> --remove-tags actual-risk:,actual-risk-level:
+satelle story set <id> --add-tags "actual-risk:$(jq .total risk-actual.json),actual-risk-level:$(jq -r '.level|ascii_downcase' risk-actual.json)"
+satelle story attach <id> --name risk-actual --type output --file risk-actual.json
+```
+
+The attached reports keep the riskelle version and rules hash behind each
+figure.
+
+**A High estimate** is refused at `in_progress` until the story is split. The
+one exit is a developer's decision, taken from their own terminal (satelle
+refuses it from an agent session):
+`satelle story waive <id> --gate riskelle-risk-review --check high-estimate --reason "..."`.
+The gate reads that waiver from its payload and records it in its verdict
+notes; no other check of the gate can be waived.
+
+The gate's exact behaviour on each edge, including the estimate-beside-actual
+line it leaves for reviewers, is in the skill file itself.
 
 ## Rules
 
