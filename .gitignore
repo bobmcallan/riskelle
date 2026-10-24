@@ -13,3 +13,11 @@
 .cursor/
 CLAUDE.md
 AGENTS.md
+
+# >>> satelle (managed) >>>
+# satelle adds only entries it needs that this file does not already settle;
+# the operator owns .gitignore and any rule written here or elsewhere is kept.
+# Runtime state lives under ~/.satelle/<repo-key>/, outside the repo.
+sty_*_body.md
+sty_*_ac.md
+# <<< satelle (managed) <<<
