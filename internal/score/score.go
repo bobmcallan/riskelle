@@ -40,9 +40,18 @@ type Point struct {
 
 // Result is a scored change.
 type Result struct {
-	Total     int     `json:"total"` // 0-100
-	Level     Level   `json:"level"`
-	Breakdown []Point `json:"breakdown"` // size/lines, then spread/files, directories, projects
+	Total      int        `json:"total"` // 0-100
+	Level      Level      `json:"level"`
+	Breakdown  []Point    `json:"breakdown"`           // size/lines, then spread/files, directories, projects
+	Provenance Provenance `json:"provenance,omitzero"` // set by the caller that loaded the rules; Score leaves it zero
+}
+
+// Provenance records what a result was scored with, so it can be reproduced.
+type Provenance struct {
+	Version     string `json:"riskelle_version"` // the riskelle build
+	RulesSource string `json:"rules_source"`     // "built-in" or ".risk/rules.json"
+	RulesCommit string `json:"rules_commit"`     // full SHA of the target-branch commit the rules were read at
+	RulesHash   string `json:"rules_hash"`       // "sha256:" + hex of the effective rules' JSON
 }
 
 // Score scores the facts of one change against rules. Every breakdown entry is
@@ -68,15 +77,20 @@ func Score(f facts.Facts, r Rules) Result {
 }
 
 // size sums the lines added and removed in every file in none of the rules'
-// excluded classes.
+// excluded classes. A path matching the rules' Generated globs counts as
+// generated.
 func size(files []facts.File, r Rules) Point {
 	excluded := map[facts.Class]bool{}
 	for _, c := range r.SizeExcludes {
 		excluded[c] = true
 	}
+	var generated facts.Globs
+	if excluded[facts.ClassGenerated] {
+		generated = facts.CompileGlobs(r.Generated)
+	}
 	p := Point{Measure: MeasureSize, Fact: "lines", From: []string{}}
 	for _, file := range files {
-		if anyExcluded(file.Classes, excluded) {
+		if anyExcluded(file.Classes, excluded) || generated.Match(file.Path) {
 			p.Excluded = append(p.Excluded, file.Path)
 			continue
 		}

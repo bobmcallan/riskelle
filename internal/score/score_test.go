@@ -279,3 +279,22 @@ func TestScoreDoesNotAliasInput(t *testing.T) {
 		t.Errorf("result changed with its input: %q", got)
 	}
 }
+
+func TestRepoGeneratedPathsLeftOutOfSize(t *testing.T) {
+	f := facts.Facts{Files: []facts.File{{Path: "gen/x.go", Added: 300}, {Path: "main.go", Added: 40}}}
+	r := Default()
+	r.Generated = []string{"gen/**"}
+	p := entry(t, Score(f, r), "size", "lines")
+	if p.Value != 40 || p.Min != 0 || p.Points != 0 {
+		t.Errorf("size = %d (band %d, %d points), want main.go's 40 lines alone (band 0, 0 points)", p.Value, p.Min, p.Points)
+	}
+	if !slices.Equal(p.Excluded, []string{"gen/x.go"}) || !slices.Equal(p.From, []string{"main.go"}) {
+		t.Errorf("size from %v excluded %v, want from [main.go] excluded [gen/x.go]", p.From, p.Excluded)
+	}
+	// The repo's patterns mean "generated": when size counts generated files, it counts them too.
+	r.SizeExcludes = []facts.Class{facts.ClassDocs, facts.ClassLock}
+	p = entry(t, Score(f, r), "size", "lines")
+	if p.Value != 340 || len(p.Excluded) != 0 {
+		t.Errorf("size without excluding generated = %d excluded %v, want 340 and none", p.Value, p.Excluded)
+	}
+}

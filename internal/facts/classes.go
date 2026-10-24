@@ -131,3 +131,25 @@ func globRegexp(glob string) string {
 	b.WriteString("$")
 	return b.String()
 }
+
+// Globs are repo-added patterns in the builtin syntax, compiled once.
+type Globs []*regexp.Regexp
+
+// CompileGlobs compiles patterns; globRegexp quotes every literal, so none fails.
+func CompileGlobs(patterns []string) Globs {
+	g := make(Globs, 0, len(patterns))
+	for _, p := range patterns {
+		g = append(g, regexp.MustCompile(globRegexp(p)))
+	}
+	return g
+}
+
+// Match reports whether p matches any of the globs.
+func (g Globs) Match(p string) bool {
+	for _, re := range g {
+		if re.MatchString(p) {
+			return true
+		}
+	}
+	return false
+}

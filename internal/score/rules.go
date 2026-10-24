@@ -35,6 +35,7 @@ type LevelEdge struct {
 // .risk/rules.json are scored by the same function.
 type Rules struct {
 	SizeExcludes []facts.Class `json:"size_excludes"` // classes whose lines size leaves out
+	Generated    []string      `json:"generated"`     // repo-added generated-path globs (.risk/rules.json); size leaves them out with ClassGenerated
 	SizeLines    Bands         `json:"size_lines"`
 	SpreadFiles  Bands         `json:"spread_files"`
 	SpreadDirs   Bands         `json:"spread_directories"`
