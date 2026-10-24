@@ -22,6 +22,13 @@ func TestParse(t *testing.T) {
 		{`{"generated":["/x"]}`, File{}, `generated[0] "/x": patterns are repo-relative`},
 		{`{} {}`, File{}, "trailing data"},
 		{`{"generated":`, File{}, "unexpected EOF"},
+		{`{"areas":{"payments":["billing/**"],"auth":["src/login/**"]}}`,
+			File{Areas: map[string][]string{"payments": {"billing/**"}, "auth": {"src/login/**"}}}, ""},
+		{`{"areas":{"Pay":["x"]}}`, File{}, `areas: invalid name "Pay"`},
+		{`{"areas":{"pay":[]}}`, File{}, "areas.pay: no patterns"},
+		{`{"areas":{"pay":["ok/**",""]}}`, File{}, "areas.pay[1]: empty pattern"},
+		{`{"areas":{"pay":["/x"]}}`, File{}, `areas.pay[0] "/x": patterns are repo-relative`},
+		{`{"areas":["x"]}`, File{}, "cannot unmarshal"},
 	}
 	for _, tt := range tests {
 		got, err := Parse([]byte(tt.in))
@@ -48,6 +55,19 @@ func TestApply(t *testing.T) {
 	if want := []string{"z/**", "a/**"}; !reflect.DeepEqual(base.Generated, want) {
 		t.Errorf("Apply changed its input: %v, want %v", base.Generated, want)
 	}
+
+	base = score.Default()
+	base.Areas = map[string][]string{"auth": {"z/**"}}
+	got = Apply(base, File{Areas: map[string][]string{"auth": {"z/**", "a/**"}, "pay": {"b/**"}}})
+	if want := map[string][]string{"auth": {"a/**", "z/**"}, "pay": {"b/**"}}; !reflect.DeepEqual(got.Areas, want) {
+		t.Errorf("Apply Areas = %v, want %v", got.Areas, want)
+	}
+	if want := map[string][]string{"auth": {"z/**"}}; !reflect.DeepEqual(base.Areas, want) {
+		t.Errorf("Apply changed its input: %v, want %v", base.Areas, want)
+	}
+	if got := Apply(score.Default(), File{Areas: map[string][]string{}}); got.Areas != nil {
+		t.Errorf("Apply with no areas = %v, want nil", got.Areas)
+	}
 }
 
 func TestHash(t *testing.T) {
@@ -60,5 +80,11 @@ func TestHash(t *testing.T) {
 	b := Apply(score.Default(), File{Generated: []string{"b/**", "a/**", "a/**"}})
 	if Hash(a) != Hash(b) || Hash(a) == def {
 		t.Errorf("Hash(a) = %s, Hash(b) = %s, default %s: want a == b != default", Hash(a), Hash(b), def)
+	}
+	// Added areas are part of the effective rules, in any order.
+	c := Apply(score.Default(), File{Areas: map[string][]string{"pay": {"a/**", "b/**"}, "auth": {"x/**"}}})
+	d := Apply(score.Default(), File{Areas: map[string][]string{"auth": {"x/**"}, "pay": {"b/**", "a/**"}}})
+	if Hash(c) != Hash(d) || Hash(c) == def {
+		t.Errorf("Hash(c) = %s, Hash(d) = %s, default %s: want c == d != default", Hash(c), Hash(d), def)
 	}
 }

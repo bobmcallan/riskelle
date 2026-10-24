@@ -21,7 +21,8 @@ const (
 // builtin is the one listing of riskelle's built-in path patterns, versioned
 // with each release. Repo-added patterns (from .risk/rules.json) extend it;
 // they never replace it. Later stories that need the built-in rules reuse this
-// table rather than keep a second one.
+// table rather than keep a second one; the only other built-in path table is
+// builtinAreas (areas.go), whose sensitive areas are not classes and never score.
 //
 // Patterns are globs over the whole slash-separated, repo-relative path and
 // are case-sensitive: "**/" matches zero or more directories, a trailing "/**"
