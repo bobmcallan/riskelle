@@ -133,9 +133,10 @@ func TestImpactInTotal(t *testing.T) {
 	}
 	for _, tt := range tests {
 		f := facts.Facts{Directories: names("d", tt.dirs)}
-		f.Files = []facts.File{{Path: "main.go", Added: tt.lines}}
+		// New files with a test change, so degree and tests score 0.
+		f.Files = []facts.File{{Path: "main_test.go", Added: tt.lines, New: true, Classes: []facts.Class{facts.ClassTest}}}
 		for _, p := range names("f", tt.files-1) {
-			f.Files = append(f.Files, facts.File{Path: p})
+			f.Files = append(f.Files, facts.File{Path: p, New: true})
 		}
 		f.Impact.Packages = []facts.Dependency{{Name: "example.com/m", Dependents: tt.dependents}}
 		r := Score(f, Default())

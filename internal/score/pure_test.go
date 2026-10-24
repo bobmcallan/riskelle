@@ -17,6 +17,8 @@ func TestDefaultRulesValid(t *testing.T) {
 	for name, bands := range map[string]Bands{
 		"size_lines": r.SizeLines, "spread_files": r.SpreadFiles,
 		"spread_directories": r.SpreadDirs, "spread_projects": r.SpreadProjs,
+		"degree_existing_lines": r.DegreeExisting, "branch_age_days": r.BranchAgeDays,
+		"branch_trunk_commits": r.BranchTrunkCommits, "tests_untested": r.TestsUntested,
 		"impact_dependents": r.ImpactDependents,
 	} {
 		if len(bands) == 0 || bands[0] != (Band{0, 0}) {
@@ -55,8 +57,8 @@ func TestDefaultRulesValid(t *testing.T) {
 // rules are in the binary, not in a file beside it.
 func TestScoreNeedsNoDisk(t *testing.T) {
 	t.Chdir(t.TempDir())
-	if r := Score(mixed(), Default()); r.Total != 17 || r.Level != Low {
-		t.Errorf("total %d level %q, want 17 Low", r.Total, r.Level)
+	if r := Score(mixed(), Default()); r.Total != 19 || r.Level != Low {
+		t.Errorf("total %d level %q, want 19 Low", r.Total, r.Level)
 	}
 }
 
