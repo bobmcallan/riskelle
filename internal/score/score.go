@@ -22,15 +22,18 @@ const (
 
 // Measure names.
 const (
-	MeasureSize   = "size"
-	MeasureSpread = "spread"
+	MeasureSize      = "size"
+	MeasureSpread    = "spread"
+	MeasureDegree    = "degree"
+	MeasureBranchAge = "branch_age"
+	MeasureTests     = "tests"
 )
 
 // Point is one entry of the breakdown: the band one fact of one measure fell
 // in, and the facts that produced it.
 type Point struct {
-	Measure  string   `json:"measure"`            // "size" or "spread"
-	Fact     string   `json:"fact"`               // "lines", "files", "directories" or "projects"
+	Measure  string   `json:"measure"`            // one of the Measure names
+	Fact     string   `json:"fact"`               // e.g. "lines", "files", "existing_lines", "days"
 	Value    int      `json:"value"`              // the fact's value
 	Min      int      `json:"min"`                // lower edge of the band it fell in
 	Points   int      `json:"points"`             // the band's points
@@ -42,7 +45,7 @@ type Point struct {
 type Result struct {
 	Total     int     `json:"total"` // 0-100
 	Level     Level   `json:"level"`
-	Breakdown []Point `json:"breakdown"` // size/lines, then spread/files, directories, projects
+	Breakdown []Point `json:"breakdown"` // size/lines; spread/files, directories, projects; degree/existing_lines; branch_age/days, trunk_commits; tests/untested_production_files
 }
 
 // Score scores the facts of one change against rules. Every breakdown entry is
@@ -58,6 +61,10 @@ func Score(f facts.Facts, r Rules) Result {
 		point(MeasureSpread, "directories", f.Directories, r.SpreadDirs),
 		point(MeasureSpread, "projects", f.Projects, r.SpreadProjs),
 	}
+	kept, _ := counted(f.Files, r)
+	breakdown = append(breakdown, degree(kept, r))
+	breakdown = append(breakdown, branchAge(f, r)...)
+	breakdown = append(breakdown, untested(f.Files, kept, r))
 
 	total := 0
 	for _, p := range breakdown {
@@ -67,19 +74,29 @@ func Score(f facts.Facts, r Rules) Result {
 	return Result{Total: total, Level: level(total, r.Levels), Breakdown: breakdown}
 }
 
+// counted splits files into those in none of the rules' excluded classes and
+// the paths of the rest. Size, degree and tests all count only the kept files.
+func counted(files []facts.File, r Rules) (kept []facts.File, excluded []string) {
+	ex := map[facts.Class]bool{}
+	for _, c := range r.SizeExcludes {
+		ex[c] = true
+	}
+	for _, file := range files {
+		if anyExcluded(file.Classes, ex) {
+			excluded = append(excluded, file.Path)
+			continue
+		}
+		kept = append(kept, file)
+	}
+	return kept, excluded
+}
+
 // size sums the lines added and removed in every file in none of the rules'
 // excluded classes.
 func size(files []facts.File, r Rules) Point {
-	excluded := map[facts.Class]bool{}
-	for _, c := range r.SizeExcludes {
-		excluded[c] = true
-	}
-	p := Point{Measure: MeasureSize, Fact: "lines", From: []string{}}
-	for _, file := range files {
-		if anyExcluded(file.Classes, excluded) {
-			p.Excluded = append(p.Excluded, file.Path)
-			continue
-		}
+	kept, excluded := counted(files, r)
+	p := Point{Measure: MeasureSize, Fact: "lines", From: []string{}, Excluded: excluded}
+	for _, file := range kept {
 		p.Value += file.Added + file.Removed
 		p.From = append(p.From, file.Path)
 	}
