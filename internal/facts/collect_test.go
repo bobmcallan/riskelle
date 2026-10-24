@@ -67,7 +67,9 @@ func newFixture(t *testing.T) fixture {
 	runGit(t, dir, "switch", "--quiet", "-c", "feature")
 	write(t, dir, "app/main.go", "package main\n\nfunc main() { run() }\nfunc run() {}\n")
 	write(t, dir, "web/src/new.js", "a\nb\nc\nd\n")
+	write(t, dir, "web/src/new.test.js", "t\n")
 	write(t, dir, "bin/data.bin", "\x00\x01\x02\x03")
+	write(t, dir, "cli/run.go", "package cli\n\nfunc Run() {}\n")
 	if err := os.MkdirAll(filepath.Join(dir, "docs", "guide"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -99,23 +101,32 @@ func TestCollect(t *testing.T) {
 		Head:      f.feature,
 		Files: []File{
 			{Path: "app/main.go", Added: 2, Removed: 1},
-			{Path: "bin/data.bin", Binary: true},
-			{Path: "docs/guide/new.md", OldPath: "docs/old.md", Added: 1},
+			{Path: "bin/data.bin", Binary: true, New: true},
+			{Path: "cli/run.go", Added: 3, New: true},
+			{Path: "docs/guide/new.md", OldPath: "docs/old.md", Added: 1, Classes: []Class{ClassDocs}},
 			{Path: "logo.png", Binary: true},
 			{Path: "svc/Program.cs", Removed: 3},
-			{Path: "web/src/new.js", Added: 4},
+			{Path: "web/src/new.js", Added: 4, New: true},
+			{Path: "web/src/new.test.js", Added: 1, New: true, Classes: []Class{ClassTest}},
 		},
-		Directories: []string{".", "app", "bin", "docs", "docs/guide", "svc", "web/src"},
+		Directories: []string{".", "app", "bin", "cli", "docs", "docs/guide", "svc", "web/src"},
 		Projects:    []string{"app", "svc", "web"},
+		// Existing: app/main.go +2 -1, the renamed docs/guide/new.md +1 and
+		// the deleted svc/Program.cs -3. New: cli/run.go +3, web/src/new.js +4,
+		// web/src/new.test.js +1.
+		Degree: Degree{Existing: Lines{Added: 3, Removed: 4}, New: Lines{Added: 8}},
+		// cli/run.go is under no go.mod, so it is a file, not a package.
 		Impact: Impact{
 			Packages: []Dependency{{Name: "app", Dependents: 0}},
 			Files: []Dependency{
 				{Name: "bin/data.bin"},
+				{Name: "cli/run.go"},
 				{Name: "docs/guide/new.md"},
 				{Name: "docs/old.md"},
 				{Name: "logo.png"},
 				{Name: "svc/Program.cs"},
 				{Name: "web/src/new.js"},
+				{Name: "web/src/new.test.js"},
 			},
 		},
 	}
@@ -150,6 +161,9 @@ func TestCollectIsDeterministic(t *testing.T) {
 	}
 	if !reflect.DeepEqual(first, third) {
 		t.Errorf("collection after config and worktree changes differs:\n%+v\n%+v", first, third)
+	}
+	if first.Degree == (Degree{}) || first.Degree != third.Degree {
+		t.Errorf("degree = %+v then %+v, want the same non-zero split", first.Degree, third.Degree)
 	}
 }
 

@@ -44,17 +44,28 @@ func Collect(ctx context.Context, repo, base, head string) (Facts, error) {
 	if err != nil {
 		return Facts{}, err
 	}
+	// A file is classified by its head path; a rename's old path is not.
+	for i := range files {
+		files[i].Classes = Classify(files[i].Path)
+	}
 
 	roots := map[string]bool{}
+	atBase := map[string]bool{}
 	for _, commit := range []string{mergeBase, headSHA} {
-		rs, err := manifestRoots(ctx, repo, commit)
+		paths, err := treePaths(ctx, repo, commit)
 		if err != nil {
 			return Facts{}, err
 		}
-		for _, r := range rs {
+		for _, r := range manifestRoots(paths) {
 			roots[r] = true
 		}
+		if commit == mergeBase {
+			for _, p := range paths {
+				atBase[p] = true
+			}
+		}
 	}
+	markNew(files, atBase)
 
 	var touched []string
 	for _, f := range files {
@@ -74,6 +85,7 @@ func Collect(ctx context.Context, repo, base, head string) (Facts, error) {
 		Files:       files,
 		Directories: Directories(touched),
 		Projects:    Projects(touched, sorted(roots)),
+		Degree:      DegreeOf(files),
 		Impact:      impact,
 	}, nil
 }
@@ -87,19 +99,30 @@ func resolve(ctx context.Context, repo, ref string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-// manifestRoots lists the directories holding a project manifest at commit.
-func manifestRoots(ctx context.Context, repo, commit string) ([]string, error) {
+// treePaths lists every path in the tree of commit.
+func treePaths(ctx context.Context, repo, commit string) ([]string, error) {
 	out, err := git(ctx, repo, "ls-tree", "-r", "-z", "--name-only", "--full-tree", commit)
 	if err != nil {
 		return nil, err
 	}
-	var roots []string
+	var paths []string
 	for _, p := range strings.Split(string(out), "\x00") {
-		if p != "" && IsManifest(path.Base(p)) {
+		if p != "" {
+			paths = append(paths, p)
+		}
+	}
+	return paths, nil
+}
+
+// manifestRoots returns the directories of paths that hold a project manifest.
+func manifestRoots(paths []string) []string {
+	var roots []string
+	for _, p := range paths {
+		if IsManifest(path.Base(p)) {
 			roots = append(roots, path.Dir(p))
 		}
 	}
-	return roots, nil
+	return roots
 }
 
 // parseNumstat parses `git diff --numstat -z` output into files sorted by path.
