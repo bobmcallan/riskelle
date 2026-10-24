@@ -29,6 +29,10 @@ func Collect(ctx context.Context, repo, base, head string) (Facts, error) {
 		return Facts{}, fmt.Errorf("facts: no merge base between %q and %q: %w", base, head, err)
 	}
 	mergeBase := strings.TrimSpace(string(mb))
+	age, drift, err := branchHistory(ctx, repo, baseSHA, mergeBase, headSHA)
+	if err != nil {
+		return Facts{}, err
+	}
 
 	// Every setting that changes the diff is pinned by flag, so user or repo
 	// config cannot change the facts; attributes come from the head commit,
@@ -74,6 +78,10 @@ func Collect(ctx context.Context, repo, base, head string) (Facts, error) {
 			touched = append(touched, f.OldPath)
 		}
 	}
+	impact, err := CollectImpact(ctx, repo, headSHA, touched)
+	if err != nil {
+		return Facts{}, err
+	}
 	return Facts{
 		Base:        baseSHA,
 		MergeBase:   mergeBase,
@@ -82,6 +90,10 @@ func Collect(ctx context.Context, repo, base, head string) (Facts, error) {
 		Directories: Directories(touched),
 		Projects:    Projects(touched, sorted(roots)),
 		Degree:      DegreeOf(files),
+		Impact:      impact,
+
+		BranchAgeDays: age,
+		TrunkCommits:  drift,
 	}, nil
 }
 

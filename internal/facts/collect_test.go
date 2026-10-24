@@ -19,12 +19,19 @@ type fixture struct {
 
 func runGit(t *testing.T, dir string, args ...string) string {
 	t.Helper()
+	return runGitAt(t, dir, "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z", args...)
+}
+
+// runGitAt runs git in dir with the fixture identity and global config shut
+// out, recording the given author and committer dates on any commit it makes.
+func runGitAt(t *testing.T, dir, authorDate, committerDate string, args ...string) string {
+	t.Helper()
 	cmd := exec.Command("git", append([]string{"-C", dir, "-c", "commit.gpgsign=false"}, args...)...)
 	cmd.Env = append(os.Environ(),
 		"GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_CONFIG_NOSYSTEM=1",
 		"GIT_AUTHOR_NAME=Fixture", "GIT_AUTHOR_EMAIL=fixture@example.com",
 		"GIT_COMMITTER_NAME=Fixture", "GIT_COMMITTER_EMAIL=fixture@example.com",
-		"GIT_AUTHOR_DATE=2026-01-01T00:00:00Z", "GIT_COMMITTER_DATE=2026-01-01T00:00:00Z",
+		"GIT_AUTHOR_DATE="+authorDate, "GIT_COMMITTER_DATE="+committerDate,
 	)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -115,6 +122,23 @@ func TestCollect(t *testing.T) {
 		// the deleted svc/Program.cs -3. New: cli/run.go +3, web/src/new.js +4,
 		// web/src/new.test.js +1.
 		Degree: Degree{Existing: Lines{Added: 3, Removed: 4}, New: Lines{Added: 8}},
+		// cli/run.go is under no go.mod, so it is a file, not a package.
+		Impact: Impact{
+			Packages: []Dependency{{Name: "app", Dependents: 0}},
+			Files: []Dependency{
+				{Name: "bin/data.bin"},
+				{Name: "cli/run.go"},
+				{Name: "docs/guide/new.md"},
+				{Name: "docs/old.md"},
+				{Name: "logo.png"},
+				{Name: "svc/Program.cs"},
+				{Name: "web/src/new.js"},
+				{Name: "web/src/new.test.js"},
+			},
+		},
+
+		BranchAgeDays: 0, // every fixture commit is dated 2026-01-01
+		TrunkCommits:  1, // the "trunk" commit on main after the branch point
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("Collect =\n%+v\nwant\n%+v", got, want)
@@ -168,7 +192,12 @@ func TestCollectSameRef(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got.Files == nil || got.Directories == nil || got.Projects == nil ||
-		len(got.Files)+len(got.Directories)+len(got.Projects) != 0 {
+		got.Impact.Packages == nil || got.Impact.Files == nil ||
+		len(got.Files)+len(got.Directories)+len(got.Projects)+
+			len(got.Impact.Packages)+len(got.Impact.Files) != 0 {
 		t.Errorf("Collect(feature, feature) = %+v, want empty non-nil slices", got)
+	}
+	if got.BranchAgeDays != 0 || got.TrunkCommits != 0 {
+		t.Errorf("Collect(feature, feature) age, drift = %d, %d, want 0, 0", got.BranchAgeDays, got.TrunkCommits)
 	}
 }
