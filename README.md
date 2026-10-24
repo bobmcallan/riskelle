@@ -68,8 +68,9 @@ split.
 - **`.risk/rules.json` in the assessed repo:** settings that can only *add*
   risk or context (extra generated paths for the report, extra sensitive
   areas). It is read from the **target branch**, so a change cannot alter its
-  own rules, and changing it is itself flagged. Anything that would lower a
-  score is refused by name.
+  own rules. Anything that would lower a score is refused by name. A change
+  that edits `.risk/` is scored like any other change: riskelle does not try
+  to guard against a dishonest developer.
 
 Every report records the riskelle version and the rules hash it was scored with.
 
