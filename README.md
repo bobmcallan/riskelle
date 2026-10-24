@@ -297,6 +297,8 @@ that the linux/amd64 binary reports the tag as its version, and attaches the
 archives and `riskelle_vX.Y.Z_checksums.txt` to a GitHub Release named after
 the tag. A tag whose commit is not on `main` fails the run. A pushed tag is
 never moved: a broken release is fixed forward with the next patch version.
+Once the Release is published, the workflow's `pages` job publishes this README
+as the project site at https://bobmcallan.github.io/riskelle/.
 
 Verify a download:
 

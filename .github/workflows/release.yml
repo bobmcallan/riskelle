@@ -49,3 +49,33 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release create "$GITHUB_REF_NAME" dist/* --title "$GITHUB_REF_NAME" --verify-tag --generate-notes
+
+  # Publishes the README as the project site, only after the Release is out.
+  # The github-pages environment allows v* tags to deploy.
+  pages:
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v5
+      # The site is the README alone: stage it so Jekyll sees nothing else
+      # (jekyll-readme-index renders README.md as index.html).
+      - name: stage site
+        run: mkdir -p site && cp README.md site/README.md
+      - uses: actions/configure-pages@v5
+      - uses: actions/jekyll-build-pages@v1
+        with:
+          source: ./site
+          destination: ./_site
+      - uses: actions/upload-pages-artifact@v4
+      - id: deployment
+        uses: actions/deploy-pages@v4
