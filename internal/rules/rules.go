@@ -13,7 +13,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
+	"reflect"
+	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/bobmcallan/riskelle/internal/facts"
@@ -29,14 +33,50 @@ const Path = ".risk/rules.json"
 const SourceBuiltin = "built-in"
 
 // File is what .risk/rules.json may hold: additions to the built-in rules
-// only. No field replaces a built-in setting.
+// only. No field replaces a built-in setting; a key naming one is refused by
+// name (see Parse).
 type File struct {
-	Generated []string `json:"generated"` // extra generated-path globs in the built-in syntax; size leaves them out
+	Generated []string            `json:"generated"` // extra generated-path globs in the built-in syntax; size leaves them out
+	Areas     map[string][]string `json:"areas"`     // extra sensitive areas: globs by area name, added to the built-in ones; report context, never scored
 }
 
-// Parse decodes a rules file strictly: an unknown key, trailing data or an
-// invalid pattern is an error, so no setting is silently ignored.
+// areaName is what an area name may be.
+var areaName = regexp.MustCompile(`^[a-z][a-z0-9_-]*$`)
+
+// refused holds the lower-cased JSON keys of the built-in settings that File
+// does not add to: bands, level edges and exclusion classes. Replacing any of
+// them could lower a score, so .risk/rules.json may not set them. It is
+// derived from score.Rules, so a built-in setting added later is refused too.
+var refused = func() map[string]bool {
+	m := map[string]bool{}
+	for _, k := range jsonKeys(reflect.TypeFor[score.Rules]()) {
+		m[strings.ToLower(k)] = true
+	}
+	for _, k := range jsonKeys(reflect.TypeFor[File]()) {
+		delete(m, strings.ToLower(k))
+	}
+	return m
+}()
+
+// jsonKeys returns the JSON names of a struct type's tagged fields.
+func jsonKeys(t reflect.Type) []string {
+	var keys []string
+	for f := range t.Fields() {
+		name, _, _ := strings.Cut(f.Tag.Get("json"), ",")
+		if name != "" && name != "-" {
+			keys = append(keys, name)
+		}
+	}
+	return keys
+}
+
+// Parse decodes a rules file strictly: a key naming a built-in setting is
+// refused by name, and an unknown key, trailing data or an invalid pattern is
+// an error, so no setting is silently ignored.
 func Parse(data []byte) (File, error) {
+	if err := refuse(data); err != nil {
+		return File{}, err
+	}
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.DisallowUnknownFields()
 	var f File
@@ -46,26 +86,86 @@ func Parse(data []byte) (File, error) {
 	if err := dec.Decode(new(json.RawMessage)); !errors.Is(err, io.EOF) {
 		return File{}, errors.New("trailing data after the rules object")
 	}
-	for i, p := range f.Generated {
-		if p == "" {
-			return File{}, fmt.Errorf("generated[%d]: empty pattern", i)
+	if err := checkPatterns("generated", f.Generated); err != nil {
+		return File{}, err
+	}
+	for _, name := range slices.Sorted(maps.Keys(f.Areas)) {
+		if !areaName.MatchString(name) {
+			return File{}, fmt.Errorf("areas: invalid name %q", name)
 		}
-		if strings.HasPrefix(p, "/") {
-			return File{}, fmt.Errorf("generated[%d] %q: patterns are repo-relative", i, p)
+		if len(f.Areas[name]) == 0 {
+			return File{}, fmt.Errorf("areas.%s: no patterns", name)
+		}
+		if err := checkPatterns("areas."+name, f.Areas[name]); err != nil {
+			return File{}, err
 		}
 	}
 	return f, nil
 }
 
-// Apply returns r with the file's additions merged in: Generated becomes the
-// sorted, de-duplicated union of both, nil when empty. r is not changed.
-func Apply(r score.Rules, f File) score.Rules {
-	gen := slices.Concat(r.Generated, f.Generated)
-	slices.Sort(gen)
-	if r.Generated = slices.Compact(gen); len(r.Generated) == 0 {
-		r.Generated = nil
+// checkPatterns refuses an empty or absolute pattern, naming field and index.
+func checkPatterns(field string, patterns []string) error {
+	for i, p := range patterns {
+		if p == "" {
+			return fmt.Errorf("%s[%d]: empty pattern", field, i)
+		}
+		if strings.HasPrefix(p, "/") {
+			return fmt.Errorf("%s[%d] %q: patterns are repo-relative", field, i, p)
+		}
 	}
+	return nil
+}
+
+// refuse returns an error naming, in sorted order, every top-level key of
+// data that would replace a built-in setting. Keys match case-insensitively,
+// as encoding/json matches fields. Data that is not a JSON object is left to
+// Parse's strict decode to report.
+func refuse(data []byte) error {
+	var obj map[string]json.RawMessage
+	if json.NewDecoder(bytes.NewReader(data)).Decode(&obj) != nil {
+		return nil
+	}
+	var names []string
+	for k := range obj {
+		if refused[strings.ToLower(k)] {
+			names = append(names, strconv.Quote(k))
+		}
+	}
+	if len(names) == 0 {
+		return nil
+	}
+	slices.Sort(names)
+	return fmt.Errorf("refused %s: %s may only add risk or context; these would replace built-in settings and could lower a score",
+		strings.Join(names, ", "), Path)
+}
+
+// Apply returns r with the file's additions merged in: Generated becomes the
+// sorted, de-duplicated union of both, nil when empty, and so does each area's
+// patterns in Areas, a fresh map nil when empty. r is not changed.
+func Apply(r score.Rules, f File) score.Rules {
+	r.Generated = union(r.Generated, f.Generated)
+	var areas map[string][]string
+	for _, m := range []map[string][]string{r.Areas, f.Areas} {
+		for name, ps := range m {
+			if areas == nil {
+				areas = map[string][]string{}
+			}
+			areas[name] = union(areas[name], ps)
+		}
+	}
+	r.Areas = areas
 	return r
+}
+
+// union returns the sorted, de-duplicated patterns of a and b in a new slice,
+// nil when empty.
+func union(a, b []string) []string {
+	u := slices.Concat(a, b)
+	slices.Sort(u)
+	if u = slices.Compact(u); len(u) == 0 {
+		return nil
+	}
+	return u
 }
 
 // Hash returns "sha256:" and the hex SHA-256 of the rules' JSON, whose field
@@ -73,7 +173,7 @@ func Apply(r score.Rules, f File) score.Rules {
 func Hash(r score.Rules) string {
 	data, err := json.Marshal(r)
 	if err != nil {
-		panic(err) // Rules holds only strings, ints and slices of them
+		panic(err) // Rules holds only strings, ints, and slices and string-keyed maps of them
 	}
 	sum := sha256.Sum256(data)
 	return "sha256:" + hex.EncodeToString(sum[:])

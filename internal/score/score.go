@@ -50,7 +50,15 @@ type Result struct {
 	Total      int        `json:"total"` // 0-100
 	Level      Level      `json:"level"`
 	Breakdown  []Point    `json:"breakdown"`           // size/lines; spread/files, directories, projects; degree/existing_lines; branch_age/days, trunk_commits; tests/untested_production_files; impact/dependents
+	Areas      []Area     `json:"areas,omitempty"`     // sensitive areas the change lands in, sorted by name; reviewer context only, never scored; nil when none
 	Provenance Provenance `json:"provenance,omitzero"` // set by the caller that loaded the rules; Score leaves it zero
+}
+
+// Area is one sensitive area a change lands in and the changed paths that
+// matched it, sorted.
+type Area struct {
+	Name  string   `json:"name"`
+	Paths []string `json:"paths"`
 }
 
 // Provenance records what a result was scored with, so it can be reproduced.
@@ -63,6 +71,8 @@ type Provenance struct {
 
 // Score scores the facts of one change against rules. Every breakdown entry is
 // kept, 0 points included, in a fixed order; later measures append theirs.
+// Areas are reviewer context: they are found after the total and never add
+// points.
 func Score(f facts.Facts, r Rules) Result {
 	var paths []string
 	for _, file := range f.Files {
@@ -85,7 +95,7 @@ func Score(f facts.Facts, r Rules) Result {
 		total += p.Points
 	}
 	total = max(0, min(total, 100))
-	return Result{Total: total, Level: level(total, r.Levels), Breakdown: breakdown}
+	return Result{Total: total, Level: level(total, r.Levels), Breakdown: breakdown, Areas: areas(f.Files, r)}
 }
 
 // counted splits files into those in none of the rules' excluded classes and

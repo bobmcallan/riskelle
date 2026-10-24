@@ -50,6 +50,11 @@ type Rules struct {
 	ImpactDependents Bands         `json:"impact_dependents"`
 
 	Levels []LevelEdge `json:"levels"` // ascending, the first at Min 0
+
+	// Repo-added sensitive areas (.risk/rules.json): globs by area name,
+	// beside the built-in areas in facts. Report context only, never scored;
+	// omitted when empty, so the built-in rules hash as before.
+	Areas map[string][]string `json:"areas,omitempty"`
 }
 
 // Default returns riskelle's built-in rules: compiled into the binary and
