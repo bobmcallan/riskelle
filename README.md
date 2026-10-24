@@ -129,58 +129,48 @@ Every report records the riskelle version and the rules hash it was scored with.
 
 - Locally, by developers and coding agents.
 - Azure DevOps pipelines and GitHub Actions, posting a PR status and one summary
-  comment kept up to date.
+  comment kept up to date (GitHub: see [GitHub pull requests](#github-pull-requests)).
 - Results go to a ledger keyed by developer, from which the KPI (share of low
   risk changes, alongside volume) is reported per period with the rules pinned
   for that period.
 
-### Azure DevOps
+### GitHub pull requests
 
-[`ado/riskelle.yml`](ado/riskelle.yml) is a job template that scores every
-pull request with a released riskelle. Its parameters and the permissions it
-needs are documented in the template's header comments. To adopt it:
+The action in `action.yml` scores every pull request with a **released**
+riskelle binary (downloaded from GitHub Releases and checked against the
+release's checksums file, never built from the PR), posts a `riskelle` commit
+status on the PR head, and keeps one summary comment on the PR, updated in
+place on each push. riskelle's own `.github/workflows/riskelle.yml` runs it and
+is the workflow to copy.
 
-1. Reference the template from your pipeline, at the same release tag you run.
-   Through a GitHub service connection (`riskelle-github` here):
+To adopt it in a repository:
 
-   ```yaml
-   resources:
-     repositories:
-       - repository: riskelle
-         type: github
-         endpoint: riskelle-github
-         name: bobmcallan/riskelle
-         ref: refs/tags/vX.Y.Z
+1. While `bobmcallan/riskelle` is private: its owner allows Actions access from
+   the owner's other repositories (Settings, Actions, General, Access), and the
+   adopting repository stores a token that can read riskelle's releases as a
+   secret, passed as the action's `release-token`.
+2. Copy `.github/workflows/riskelle.yml` to `.github/workflows/` and replace
+   `uses: ./` with `uses: bobmcallan/riskelle@vX.Y.Z`, setting `version` to the
+   same tag. Keep its permissions (`pull-requests: write` and `statuses: write`
+   for the default token), `fetch-depth: 0` (the merge base, branch age and
+   trunk drift need history) and its concurrency group.
+3. Inputs and outputs (`total`, `level`) are described in `action.yml`.
 
-   jobs:
-     - template: ado/riskelle.yml@riskelle
-       parameters:
-         version: vX.Y.Z
-   ```
+On the pull request:
 
-   Or copy `ado/riskelle.yml` into your repository and use
-   `- template: ado/riskelle.yml` with the same `version` parameter.
-2. Make the pipeline run on pull requests: on Azure Repos, add it as a
-   **Build validation** policy on the target branch (the job is skipped on any
-   build that is not for a pull request).
-3. Grant the project's build service identity **Contribute to pull requests**
-   on the repository, so the job can post the status and the comment.
+- The `riskelle` status reads `<Level> · <total> / 100` and links to the
+  summary comment. It is always `success`: the score is a measure, not a merge
+  gate (a branch rule can still require the status). It is `error`, linking to
+  the run, when riskelle cannot score; the comment is then left as it was.
+- The summary comment is the `riskelle score --format markdown` report behind a
+  hidden `<!-- riskelle:summary -->` marker. Duplicate marked comments are
+  deleted; other comments are never touched.
+- The base is the target branch's tip and the head is the PR head commit (not
+  GitHub's merge commit), both named in full on the report, so
+  `riskelle score --base <base> --head <head>` with the same release reproduces
+  it locally byte for byte. The rules are read from the target branch.
 
-Each pull request build then gives:
-
-- a PR status `riskelle/score` whose description carries the band and total
-  (`Low, 7/100`). It is `succeeded` for every band (riskelle measures, it does
-  not gate) and `error` when the change could not be scored;
-- one summary comment, the Markdown report, updated in place on every push;
-- the JSON report as the build artifact `riskelle`.
-
-The pipeline scores the PR's own head commit against its target branch tip,
-not the merge commit ADO builds, so the result is what you get locally. To
-reproduce it, run the same release with the `base` and `head` SHAs from the
-report: `riskelle score --base <base> --head <head>`.
-
-Self-hosted agents need Linux (amd64 or arm64) with bash, git, curl, jq, tar
-and sha256sum, as Microsoft-hosted Ubuntu agents have.
+Pull requests from forks are not supported: their token cannot post.
 
 ## Releasing
 
