@@ -104,12 +104,13 @@ func TestCollectFactsFromAFixtureRepository(t *testing.T) {
 		`"merge_base":"` + fixtureGit(t, dir, "rev-parse", "main~1") + `",` +
 		`"head":"` + fixtureGit(t, dir, "rev-parse", "topic") + `",` +
 		`"files":[` +
-		`{"path":"notes/done/todo.md","old_path":"notes/todo.md","added":0,"removed":0},` +
+		`{"path":"notes/done/todo.md","old_path":"notes/todo.md","added":0,"removed":0,"classes":["docs"]},` +
 		`{"path":"pkg/a.go","added":1,"removed":1},` +
 		`{"path":"ui/app.js","added":1,"removed":0},` +
-		`{"path":"ui/icon.ico","added":0,"removed":0,"binary":true}],` +
+		`{"path":"ui/icon.ico","added":0,"removed":0,"binary":true,"new":true}],` +
 		`"directories":["notes","notes/done","pkg","ui"],` +
 		`"projects":[".","ui"],` +
+		`"degree":{"existing":{"added":2,"removed":1},"new":{"added":0,"removed":0}},` +
 		`"branch_age_days":0,"trunk_commits":1}`
 	if string(gotJSON) != want {
 		t.Errorf("facts JSON =\n%s\nwant\n%s", gotJSON, want)
@@ -131,7 +132,10 @@ func TestCollectFactsOfAnEmptyChange(t *testing.T) {
 		t.Fatalf("Collect: %v", err)
 	}
 	b, _ := json.Marshal(got)
-	if s := string(b); !strings.Contains(s, `"files":[],"directories":[],"projects":[],"branch_age_days":0,"trunk_commits":0`) {
+	if s := string(b); !strings.Contains(s, `"files":[],"directories":[],"projects":[]`) {
 		t.Errorf("facts JSON = %s, want empty lists", s)
+	}
+	if s := string(b); !strings.Contains(s, `"branch_age_days":0,"trunk_commits":0`) {
+		t.Errorf("facts JSON = %s, want zero branch age and trunk drift", s)
 	}
 }

@@ -11,11 +11,13 @@ import (
 
 // File is one changed file and its line counts.
 type File struct {
-	Path    string `json:"path"`               // path at head, slash-separated, repo-relative
-	OldPath string `json:"old_path,omitempty"` // path at base when renamed
-	Added   int    `json:"added"`
-	Removed int    `json:"removed"`
-	Binary  bool   `json:"binary,omitempty"` // git reported no line counts; Added and Removed are 0
+	Path    string  `json:"path"`               // path at head, slash-separated, repo-relative
+	OldPath string  `json:"old_path,omitempty"` // path at base when renamed
+	Added   int     `json:"added"`
+	Removed int     `json:"removed"`
+	Binary  bool    `json:"binary,omitempty"`  // git reported no line counts; Added and Removed are 0
+	New     bool    `json:"new,omitempty"`     // absent at the merge base; every line in Added is new code
+	Classes []Class `json:"classes,omitempty"` // path classes from Classify; nil when none
 }
 
 // Facts are the collected facts about one change. Every slice is sorted and
@@ -27,6 +29,7 @@ type Facts struct {
 	Files       []File   `json:"files"`
 	Directories []string `json:"directories"`
 	Projects    []string `json:"projects"`
+	Degree      Degree   `json:"degree"` // lines in files that existed at the merge base against lines in new files
 
 	// Commit history, never the clock.
 	BranchAgeDays int `json:"branch_age_days"` // whole days from the branch's first commit to head; 0 with no commits of its own
