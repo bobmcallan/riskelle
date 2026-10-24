@@ -90,8 +90,19 @@ a JSON plan file that predicts the change:
 Any other field is refused. Trunk drift cannot be planned and is 0. A plan
 that is invalid or incomplete is refused with every problem named, exit code 1.
 
-It prints the same scored result as a real score, marked `"kind": "estimate"`
-and naming the plan file in `"plan"`.
+It prints the same report as a real score, marked `"kind": "estimate"` and
+naming the plan file in `"plan"`.
+
+### Report
+
+`riskelle estimate` prints its report as JSON by default, or as a Markdown
+summary for a PR comment with `--format markdown` (flags go before the plan
+file). Both carry the total and level, every breakdown entry with the facts
+behind it, and the provenance (riskelle version, rules source, rules commit
+and hash); an estimate is marked as one. The sensitive areas the change lands in sit apart,
+under `"context"` (JSON) or "Where it lands (context, not scored)" (Markdown),
+labelled as context that does not count towards the score. The same result
+always prints the same bytes.
 
 With [satelle](https://github.com/bobmcallan/satelle), the estimate and the
 actual are recorded on the story, so the developer and the agent work the

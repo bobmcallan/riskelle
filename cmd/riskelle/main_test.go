@@ -24,6 +24,9 @@ func TestRun(t *testing.T) {
 		{"estimate without a plan", []string{"estimate"}, 2, "", "usage"},
 		{"estimate with two plans", []string{"estimate", "a.json", "b.json"}, 2, "", "one plan file"},
 		{"estimate with a missing plan", []string{"estimate", "no-such-plan.json"}, 1, "", "no-such-plan.json"},
+		{"estimate with an unknown format", []string{"estimate", "--format", "xml", "a.json"}, 2, "", `unknown format "xml"`},
+		{"estimate with a format and no plan", []string{"estimate", "--format", "markdown"}, 2, "", "one plan file"},
+		{"estimate with an unknown flag", []string{"estimate", "--bogus", "a.json"}, 2, "", "-bogus"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -10,18 +10,19 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/bobmcallan/riskelle/internal/report"
 	"github.com/bobmcallan/riskelle/internal/score"
 )
 
-// runEstimate runs `riskelle estimate plan` in dir and returns its exit code,
+// runEstimate runs `riskelle estimate args...` in dir and returns its exit code,
 // stdout and stderr.
-func runEstimate(t *testing.T, bin, dir, plan string) (int, string, string) {
+func runEstimate(t *testing.T, bin, dir string, args ...string) (int, string, string) {
 	t.Helper()
-	cmd := exec.Command(bin, "estimate", plan)
+	cmd := exec.Command(bin, append([]string{"estimate"}, args...)...)
 	var stdout, stderr bytes.Buffer
 	cmd.Dir, cmd.Stdout, cmd.Stderr = dir, &stdout, &stderr
 	if err := cmd.Run(); err != nil && cmd.ProcessState == nil {
-		t.Fatalf("riskelle estimate %s: %v", plan, err)
+		t.Fatalf("riskelle estimate %v: %v", args, err)
 	}
 	return cmd.ProcessState.ExitCode(), stdout.String(), stderr.String()
 }
@@ -69,18 +70,14 @@ func TestEstimateScoresLikeTheActualDiff(t *testing.T) {
 	if _, again, _ := runEstimate(t, bin, dir, "plan.json"); again != stdout {
 		t.Errorf("estimate differs between runs:\n%s\n%s", stdout, again)
 	}
-	var got struct {
-		Kind string `json:"kind"`
-		Plan string `json:"plan"`
-		score.Result
-	}
+	var got report.Report
 	dec := json.NewDecoder(strings.NewReader(stdout))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&got); err != nil {
 		t.Fatalf("decoding estimate output %q: %v", stdout, err)
 	}
-	if got.Kind != "estimate" || got.Plan != "plan.json" {
-		t.Errorf("kind, plan = %q, %q; want \"estimate\", \"plan.json\"", got.Kind, got.Plan)
+	if got.Kind != "estimate" || got.Plan != "plan.json" || got.Context.Note != report.Note {
+		t.Errorf("kind, plan, note = %q, %q, %q; want \"estimate\", \"plan.json\", report.Note", got.Kind, got.Plan, got.Context.Note)
 	}
 	// Two things differ by nature, not by scoring: the test binary and the
 	// built binary report different builds (the rules source, commit and hash
@@ -92,10 +89,28 @@ func TestEstimateScoresLikeTheActualDiff(t *testing.T) {
 			actual.Breakdown[i].From = []string{}
 		}
 	}
-	gotJSON, _ := json.Marshal(got.Result)
-	wantJSON, _ := json.Marshal(actual)
+	want := report.New(report.KindEstimate, actual)
+	want.Plan = "plan.json"
+	gotJSON, _ := json.Marshal(got)
+	wantJSON, _ := json.Marshal(want)
 	if string(gotJSON) != string(wantJSON) {
 		t.Errorf("estimate scores\n%s\nactual diff scores\n%s", gotJSON, wantJSON)
+	}
+
+	// The Markdown is the same report rendered for a PR comment, and stable.
+	code, md, stderr := runEstimate(t, bin, dir, "--format", "markdown", "plan.json")
+	if code != 0 {
+		t.Fatalf("riskelle estimate --format markdown: exit %d, stderr %q", code, stderr)
+	}
+	if _, again, _ := runEstimate(t, bin, dir, "--format", "markdown", "plan.json"); again != md {
+		t.Errorf("markdown estimate differs between runs:\n%s\n%s", md, again)
+	}
+	var wantMD strings.Builder
+	var decoded report.Report
+	json.Unmarshal([]byte(stdout), &decoded)
+	decoded.Markdown(&wantMD)
+	if md != wantMD.String() || !strings.HasPrefix(md, "## riskelle estimate: 12 / 100, Low\n") {
+		t.Errorf("markdown estimate:\n%s\nwant the JSON report rendered:\n%s", md, wantMD.String())
 	}
 
 	t.Run("refusals", func(t *testing.T) {

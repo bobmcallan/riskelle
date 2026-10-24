@@ -1,0 +1,67 @@
+{
+  "kind": "estimate",
+  "plan": "plan.json",
+  "total": 7,
+  "level": "Low",
+  "breakdown": [
+    {
+      "measure": "size",
+      "fact": "lines",
+      "value": 101,
+      "min": 51,
+      "points": 5,
+      "from": [
+        "core/calc.go",
+        "ui/a&b<c>.js"
+      ],
+      "excluded": [
+        "docs/guide.md"
+      ]
+    },
+    {
+      "measure": "impact",
+      "fact": "dependents",
+      "value": 4,
+      "min": 3,
+      "points": 2,
+      "from": [
+        "example.com/m/core",
+        "ui/a&b<c>.js"
+      ],
+      "dependents": [
+        {
+          "name": "example.com/m/core",
+          "dependents": 4
+        },
+        {
+          "name": "ui/a&b<c>.js",
+          "dependents": 1
+        }
+      ]
+    }
+  ],
+  "context": {
+    "note": "Where the change lands is context for reviewers; it does not count towards the score.",
+    "areas": [
+      {
+        "name": "auth",
+        "paths": [
+          "internal/auth/login.go"
+        ]
+      },
+      {
+        "name": "payments",
+        "paths": [
+          "pay/card.go",
+          "pay/refund.go"
+        ]
+      }
+    ]
+  },
+  "provenance": {
+    "riskelle_version": "v0.11.0",
+    "rules_source": ".risk/rules.json",
+    "rules_commit": "0123456789abcdef0123456789abcdef01234567",
+    "rules_hash": "sha256:00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"
+  }
+}

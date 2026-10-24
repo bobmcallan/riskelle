@@ -3,21 +3,24 @@ package main
 
 import (
 	"context"
-	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
 	"os"
+	"slices"
+	"strings"
 
 	"github.com/bobmcallan/riskelle/internal/facts"
+	"github.com/bobmcallan/riskelle/internal/report"
 	"github.com/bobmcallan/riskelle/internal/rules"
-	"github.com/bobmcallan/riskelle/internal/score"
 	"github.com/bobmcallan/riskelle/internal/version"
 )
 
 const usage = `usage: riskelle <command>
 
 commands:
-  estimate  score a planned change from a plan file (format: README.md, Plan file)
+  estimate [--format json|markdown] <plan.json>
+            score a planned change from a plan file (format: README.md, Plan file)
   version   print the riskelle version
   help      print this help
 `
@@ -35,11 +38,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	switch args[0] {
 	case "estimate":
-		if len(args) != 2 {
-			fmt.Fprintf(stderr, "riskelle: estimate takes one plan file\n%s", usage)
-			return 2
-		}
-		return estimate(args[1], stdout, stderr)
+		return estimateCmd(args[1:], stdout, stderr)
 	case "version":
 		if len(args) > 1 {
 			fmt.Fprintf(stderr, "riskelle: version takes no arguments\n%s", usage)
@@ -56,18 +55,38 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 }
 
-// estimateReport is what estimate prints: the scored result, marked as an
-// estimate of the named plan file.
-type estimateReport struct {
-	Kind string `json:"kind"` // always "estimate"
-	Plan string `json:"plan"` // the plan file as given on the command line
-	score.Result
+// flags parses a command's flags, with --format shared by every command that
+// prints a report. It returns the format, or ok false after printing the
+// usage error.
+func flags(fs *flag.FlagSet, args []string, stderr io.Writer) (format string, ok bool) {
+	fs.SetOutput(io.Discard)
+	fs.StringVar(&format, "format", report.Formats[0], "")
+	if err := fs.Parse(args); err != nil {
+		fmt.Fprintf(stderr, "riskelle: %s: %v\n%s", fs.Name(), err, usage)
+		return "", false
+	}
+	if !slices.Contains(report.Formats, format) {
+		fmt.Fprintf(stderr, "riskelle: %s: unknown format %q (want %s)\n%s",
+			fs.Name(), format, strings.Join(report.Formats, " or "), usage)
+		return "", false
+	}
+	return format, true
 }
 
-// estimate scores the plan file at planPath, for the repository in the
-// current directory, the way a real diff is scored: rules.Score, with the
-// rules read at the plan's target branch.
-func estimate(planPath string, stdout, stderr io.Writer) int {
+// estimateCmd scores the plan file, for the repository in the current
+// directory, the way a real diff is scored: rules.Score, with the rules read
+// at the plan's target branch.
+func estimateCmd(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("estimate", flag.ContinueOnError)
+	format, ok := flags(fs, args, stderr)
+	if !ok {
+		return 2
+	}
+	if fs.NArg() != 1 {
+		fmt.Fprintf(stderr, "riskelle: estimate takes one plan file\n%s", usage)
+		return 2
+	}
+	planPath := fs.Arg(0)
 	fail := func(err error) int {
 		fmt.Fprintf(stderr, "riskelle: estimate: %s: %v\n", planPath, err)
 		return 1
@@ -90,9 +109,9 @@ func estimate(planPath string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return fail(err)
 	}
-	enc := json.NewEncoder(stdout)
-	enc.SetIndent("", "  ")
-	if err := enc.Encode(estimateReport{Kind: "estimate", Plan: planPath, Result: res}); err != nil {
+	r := report.New(report.KindEstimate, res)
+	r.Plan = planPath
+	if err := report.Write(stdout, format, r); err != nil {
 		return fail(err)
 	}
 	return 0
