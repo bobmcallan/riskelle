@@ -61,7 +61,10 @@ func TestScoreCollectedFacts(t *testing.T) {
 	// spread: 6 files -> 2, 5 directories (., api, core, docs, ui) -> 4,
 	// 2 projects (., ui) -> 3. Every file is new, so degree is 0; the trunk
 	// did not move and the branch's one commit is its first, so branch age
-	// is 0; core/calc_test.go is a test change, so tests is 0. Total 19: Low.
+	// is 0; core/calc_test.go is a test change, so tests is 0. impact:
+	// nothing depends on the changed packages or ui/app.js -> 0; the doc and
+	// lock file are left out, and api/svc.pb.go counts as its package.
+	// Total 19: Low.
 	want := `{"total":19,"level":"Low","breakdown":[` +
 		`{"measure":"size","fact":"lines","value":210,"min":201,"points":10,` +
 		`"from":["core/calc.go","core/calc_test.go","ui/app.js"],` +
@@ -74,7 +77,11 @@ func TestScoreCollectedFacts(t *testing.T) {
 		`{"measure":"degree","fact":"existing_lines","value":0,"min":0,"points":0,"from":[]},` +
 		fmt.Sprintf(`{"measure":"branch_age","fact":"days","value":0,"min":0,"points":0,"from":["%s..%s"]},`, f.MergeBase, f.Head) +
 		fmt.Sprintf(`{"measure":"branch_age","fact":"trunk_commits","value":0,"min":0,"points":0,"from":["%s..%s"]},`, f.MergeBase, f.Base) +
-		`{"measure":"tests","fact":"untested_production_files","value":0,"min":0,"points":0,"from":[]}]}`
+		`{"measure":"tests","fact":"untested_production_files","value":0,"min":0,"points":0,"from":[]},` +
+		`{"measure":"impact","fact":"dependents","value":0,"min":0,"points":0,` +
+		`"from":["example.com/m/api","example.com/m/core","ui/app.js"],` +
+		`"excluded":["docs/guide.md","go.sum"],` +
+		`"dependents":[{"name":"example.com/m/api","dependents":0},{"name":"example.com/m/core","dependents":0},{"name":"ui/app.js","dependents":0}]}]}`
 	if runs[0] != want {
 		t.Errorf("score =\n%s\nwant\n%s", runs[0], want)
 	}

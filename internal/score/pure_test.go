@@ -19,6 +19,7 @@ func TestDefaultRulesValid(t *testing.T) {
 		"spread_directories": r.SpreadDirs, "spread_projects": r.SpreadProjs,
 		"degree_existing_lines": r.DegreeExisting, "branch_age_days": r.BranchAgeDays,
 		"branch_trunk_commits": r.BranchTrunkCommits, "tests_untested": r.TestsUntested,
+		"impact_dependents": r.ImpactDependents,
 	} {
 		if len(bands) == 0 || bands[0] != (Band{0, 0}) {
 			t.Errorf("%s must start at {0 0}: %v", name, bands)

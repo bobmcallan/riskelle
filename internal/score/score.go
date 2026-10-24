@@ -33,19 +33,23 @@ const (
 // in, and the facts that produced it.
 type Point struct {
 	Measure  string   `json:"measure"`            // one of the Measure names
-	Fact     string   `json:"fact"`               // e.g. "lines", "files", "existing_lines", "days"
+	Fact     string   `json:"fact"`               // e.g. "lines", "files", "existing_lines", "days", "dependents"
 	Value    int      `json:"value"`              // the fact's value
 	Min      int      `json:"min"`                // lower edge of the band it fell in
 	Points   int      `json:"points"`             // the band's points
 	From     []string `json:"from"`               // paths, directories or projects counted; sorted, non-nil
-	Excluded []string `json:"excluded,omitempty"` // size only: paths left out by class; sorted
+	Excluded []string `json:"excluded,omitempty"` // size and impact: paths left out by class; sorted
+
+	// Impact only: each counted package or file and its dependent count,
+	// sorted by name.
+	Dependents []facts.Dependency `json:"dependents,omitempty"`
 }
 
 // Result is a scored change.
 type Result struct {
 	Total      int        `json:"total"` // 0-100
 	Level      Level      `json:"level"`
-	Breakdown  []Point    `json:"breakdown"`           // size/lines; spread/files, directories, projects; degree/existing_lines; branch_age/days, trunk_commits; tests/untested_production_files
+	Breakdown  []Point    `json:"breakdown"`           // size/lines; spread/files, directories, projects; degree/existing_lines; branch_age/days, trunk_commits; tests/untested_production_files; impact/dependents
 	Provenance Provenance `json:"provenance,omitzero"` // set by the caller that loaded the rules; Score leaves it zero
 }
 
@@ -74,6 +78,7 @@ func Score(f facts.Facts, r Rules) Result {
 	breakdown = append(breakdown, degree(kept, r))
 	breakdown = append(breakdown, branchAge(f, r)...)
 	breakdown = append(breakdown, untested(f.Files, kept, r))
+	breakdown = append(breakdown, impact(f, r))
 
 	total := 0
 	for _, p := range breakdown {

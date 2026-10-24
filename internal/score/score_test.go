@@ -275,7 +275,7 @@ func TestBreakdownNamesMeasureAndFacts(t *testing.T) {
 	want := [][2]string{
 		{"size", "lines"}, {"spread", "files"}, {"spread", "directories"}, {"spread", "projects"},
 		{"degree", "existing_lines"}, {"branch_age", "days"}, {"branch_age", "trunk_commits"},
-		{"tests", "untested_production_files"},
+		{"tests", "untested_production_files"}, {"impact", "dependents"},
 	}
 	if !reflect.DeepEqual(order, want) {
 		t.Errorf("breakdown order %v, want %v", order, want)
