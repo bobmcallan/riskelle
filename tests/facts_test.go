@@ -16,7 +16,9 @@ import (
 
 // fixtureGit runs git in dir with the developer's global and system config
 // shut out and fixed identities and dates, so the fixture is the same on
-// every machine.
+// every machine. It also passes quietGitConfig, since git commit otherwise
+// leaves a detached maintenance run writing under .git while t.TempDir
+// removes the fixture.
 func fixtureGit(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	return fixtureGitAt(t, dir, "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z", args...)
@@ -25,7 +27,11 @@ func fixtureGit(t *testing.T, dir string, args ...string) string {
 // fixtureGitAt is fixtureGit with the given author and committer dates.
 func fixtureGitAt(t *testing.T, dir, authorDate, committerDate string, args ...string) string {
 	t.Helper()
-	cmd := exec.Command("git", append([]string{"-C", dir, "-c", "commit.gpgsign=false"}, args...)...)
+	argv := []string{"-C", dir, "-c", "commit.gpgsign=false"}
+	for _, kv := range quietGitConfig {
+		argv = append(argv, "-c", kv[0]+"="+kv[1])
+	}
+	cmd := exec.Command("git", append(argv, args...)...)
 	cmd.Env = append(os.Environ(),
 		"GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_CONFIG_NOSYSTEM=1",
 		"GIT_AUTHOR_NAME=Fixture", "GIT_AUTHOR_EMAIL=fixture@example.com",
@@ -143,5 +149,34 @@ func TestCollectFactsOfAnEmptyChange(t *testing.T) {
 	}
 	if s := string(b); !strings.Contains(s, `"branch_age_days":0,"trunk_commits":0`) {
 		t.Errorf("facts JSON = %s, want zero branch age and trunk drift", s)
+	}
+}
+
+// TestFixtureGitStartsNoBackgroundGit checks a commit made through
+// fixtureGit, in a fixture repository, starts no child process at all: in
+// particular not the detached "git maintenance run --auto" that can outlive
+// the test.
+func TestFixtureGitStartsNoBackgroundGit(t *testing.T) {
+	dir := t.TempDir()
+	fixtureGit(t, dir, "init", "--quiet", "--initial-branch=main")
+	writeFile(t, dir, "a.txt", "a\n")
+	fixtureGit(t, dir, "add", "a.txt")
+	fixtureGit(t, dir, "commit", "--quiet", "-m", "base")
+
+	trace := filepath.Join(t.TempDir(), "trace.json")
+	t.Setenv("GIT_TRACE2_EVENT", trace)
+	fixtureGit(t, dir, "commit", "--quiet", "--allow-empty", "-m", "traced")
+
+	events, err := os.ReadFile(trace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) == 0 {
+		t.Fatal("git wrote an empty trace; nothing was proved")
+	}
+	for _, line := range strings.Split(string(events), "\n") {
+		if strings.Contains(line, `"event":"child_start"`) {
+			t.Errorf("git commit in the fixture started a child process: %s", line)
+		}
 	}
 }
