@@ -27,6 +27,10 @@ type Facts struct {
 	Files       []File   `json:"files"`
 	Directories []string `json:"directories"`
 	Projects    []string `json:"projects"`
+
+	// Commit history, never the clock.
+	BranchAgeDays int `json:"branch_age_days"` // whole days from the branch's first commit to head; 0 with no commits of its own
+	TrunkCommits  int `json:"trunk_commits"`   // commits on base since the merge base
 }
 
 // IsManifest reports whether a file's base name marks its directory as a

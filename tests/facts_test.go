@@ -19,12 +19,18 @@ import (
 // every machine.
 func fixtureGit(t *testing.T, dir string, args ...string) string {
 	t.Helper()
+	return fixtureGitAt(t, dir, "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z", args...)
+}
+
+// fixtureGitAt is fixtureGit with the given author and committer dates.
+func fixtureGitAt(t *testing.T, dir, authorDate, committerDate string, args ...string) string {
+	t.Helper()
 	cmd := exec.Command("git", append([]string{"-C", dir, "-c", "commit.gpgsign=false"}, args...)...)
 	cmd.Env = append(os.Environ(),
 		"GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_CONFIG_NOSYSTEM=1",
 		"GIT_AUTHOR_NAME=Fixture", "GIT_AUTHOR_EMAIL=fixture@example.com",
 		"GIT_COMMITTER_NAME=Fixture", "GIT_COMMITTER_EMAIL=fixture@example.com",
-		"GIT_AUTHOR_DATE=2026-01-01T00:00:00Z", "GIT_COMMITTER_DATE=2026-01-01T00:00:00Z",
+		"GIT_AUTHOR_DATE="+authorDate, "GIT_COMMITTER_DATE="+committerDate,
 	)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -103,7 +109,8 @@ func TestCollectFactsFromAFixtureRepository(t *testing.T) {
 		`{"path":"ui/app.js","added":1,"removed":0},` +
 		`{"path":"ui/icon.ico","added":0,"removed":0,"binary":true}],` +
 		`"directories":["notes","notes/done","pkg","ui"],` +
-		`"projects":[".","ui"]}`
+		`"projects":[".","ui"],` +
+		`"branch_age_days":0,"trunk_commits":1}`
 	if string(gotJSON) != want {
 		t.Errorf("facts JSON =\n%s\nwant\n%s", gotJSON, want)
 	}
@@ -124,7 +131,7 @@ func TestCollectFactsOfAnEmptyChange(t *testing.T) {
 		t.Fatalf("Collect: %v", err)
 	}
 	b, _ := json.Marshal(got)
-	if s := string(b); !strings.Contains(s, `"files":[],"directories":[],"projects":[]`) {
+	if s := string(b); !strings.Contains(s, `"files":[],"directories":[],"projects":[],"branch_age_days":0,"trunk_commits":0`) {
 		t.Errorf("facts JSON = %s, want empty lists", s)
 	}
 }
