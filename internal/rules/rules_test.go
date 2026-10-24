@@ -1,6 +1,7 @@
 package rules
 
 import (
+	"encoding/json"
 	"reflect"
 	"regexp"
 	"strings"
@@ -17,7 +18,11 @@ func TestParse(t *testing.T) {
 	}{
 		{`{"generated":["gen/**","**/*.g.ts"]}`, File{Generated: []string{"gen/**", "**/*.g.ts"}}, ""},
 		{"{}\n\n", File{}, ""},
-		{`{"size_lines":[]}`, File{}, "size_lines"},
+		{`{"size_lines":[]}`, File{}, `refused "size_lines": .risk/rules.json may only add risk or context`},
+		{`{"generated":["gen/**"],"levels":[],"size_lines":[]}`, File{}, `refused "levels", "size_lines": `},
+		{`{"Size_Lines":[]}`, File{}, `refused "Size_Lines": `},
+		{`{"levels":[],"generated":[""]}`, File{}, `refused "levels": `},
+		{`{"generatd":[]}`, File{}, `unknown field "generatd"`},
 		{`{"generated":["a/**",""]}`, File{}, "generated[1]: empty pattern"},
 		{`{"generated":["/x"]}`, File{}, `generated[0] "/x": patterns are repo-relative`},
 		{`{} {}`, File{}, "trailing data"},
@@ -39,6 +44,48 @@ func TestParse(t *testing.T) {
 		} else if err != nil || !reflect.DeepEqual(got, tt.want) {
 			t.Errorf("Parse(%s) = %+v, %v; want %+v", tt.in, got, err, tt.want)
 		}
+	}
+}
+
+// TestRefusedCoversEveryBuiltinSetting: every built-in setting except the
+// additive generated paths is refused by name. The keys come from the
+// built-in rules' JSON, not from the reflection that builds the refused set.
+func TestRefusedCoversEveryBuiltinSetting(t *testing.T) {
+	data, err := json.Marshal(score.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var keys map[string]json.RawMessage
+	if err := json.Unmarshal(data, &keys); err != nil {
+		t.Fatal(err)
+	}
+	for key := range keys {
+		_, err := Parse([]byte(`{"` + key + `":null}`))
+		if key == "generated" {
+			if err != nil {
+				t.Errorf("Parse(generated) error = %v, want it accepted", err)
+			}
+			continue
+		}
+		if want := `refused "` + key + `"`; err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("Parse(%s) error = %v, want it to contain %q", key, err, want)
+		}
+	}
+}
+
+// TestAdditiveKeysNotRefused: every key File holds is an addition, never in
+// the refused set, and the refused set is not empty.
+func TestAdditiveKeysNotRefused(t *testing.T) {
+	if len(refused) == 0 {
+		t.Fatal("refused is empty, want the built-in settings")
+	}
+	for _, k := range jsonKeys(reflect.TypeFor[File]()) {
+		if refused[strings.ToLower(k)] {
+			t.Errorf("additive key %q is refused", k)
+		}
+	}
+	if got, err := Parse([]byte(`{"generated":["gen/**"]}`)); err != nil || !reflect.DeepEqual(got, File{Generated: []string{"gen/**"}}) {
+		t.Errorf("Parse(generated) = %+v, %v; want it accepted", got, err)
 	}
 }
 
