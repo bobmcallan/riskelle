@@ -1,0 +1,28 @@
+name: riskelle
+
+# riskelle scores every pull request with a released binary: a "riskelle"
+# status carrying the band, and one summary comment kept up to date. Adopters
+# copy this file, replacing `uses: ./` with `uses: bobmcallan/riskelle@<tag>`
+# (README.md, GitHub pull requests).
+on:
+  pull_request: {}
+
+permissions:
+  contents: read
+  pull-requests: write
+  statuses: write
+
+concurrency:
+  group: riskelle-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  riskelle:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: ./
+        with:
+          version: v0.14.0
