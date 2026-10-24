@@ -1,0 +1,127 @@
+# riskelle for Azure DevOps: a job template that scores each pull request,
+# posts the band as the PR status riskelle/score and keeps one summary comment
+# up to date. Adoption and what it posts: README.md, "Azure DevOps".
+# Parameters: version (required, e.g. v0.15.0); pool (a Linux amd64/arm64
+# agent with bash, git, curl, jq, tar, sha256sum); releases (download base,
+# <releases>/<version>/<archive>, for a mirror). The build service needs
+# "Contribute to pull requests". The scripts read only environment variables,
+# never pipeline macros, so they run unchanged outside a pipeline.
+
+parameters:
+  - name: version
+    type: string
+  - name: pool
+    type: object
+    default:
+      vmImage: ubuntu-latest
+  - name: releases
+    type: string
+    default: https://github.com/bobmcallan/riskelle/releases/download
+
+jobs:
+  - job: riskelle
+    displayName: riskelle score
+    pool: ${{ parameters.pool }}
+    condition: and(succeeded(), eq(variables['Build.Reason'], 'PullRequest'))
+    steps:
+      - checkout: self
+        fetchDepth: 0
+        fetchTags: false
+
+      - bash: |
+          # riskelle: install
+          set -euo pipefail
+          if [[ ! $RISKELLE_VERSION =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "riskelle: version '$RISKELLE_VERSION' is not a release tag vX.Y.Z" >&2
+            exit 1
+          fi
+          case $(uname -s)/$(uname -m) in
+            Linux/x86_64 | Linux/amd64) arch=amd64 ;;
+            Linux/aarch64 | Linux/arm64) arch=arm64 ;;
+            *) echo "riskelle: the template runs on Linux amd64 or arm64 agents, not $(uname -sm)" >&2; exit 1 ;;
+          esac
+          name="riskelle_${RISKELLE_VERSION}_linux_${arch}"
+          sums="riskelle_${RISKELLE_VERSION}_checksums.txt"
+          dir="$AGENT_TEMPDIRECTORY/riskelle-$RISKELLE_VERSION"
+          rm -rf "$dir"
+          mkdir -p "$dir"
+          cd "$dir"
+          curl -fsSL -o "$name.tar.gz" "$RISKELLE_RELEASES/$RISKELLE_VERSION/$name.tar.gz"
+          curl -fsSL -o "$sums" "$RISKELLE_RELEASES/$RISKELLE_VERSION/$sums"
+          line=$(awk -v f="$name.tar.gz" '$2 == f' "$sums")
+          if [[ -z $line ]]; then
+            echo "riskelle: $sums has no line for $name.tar.gz" >&2
+            exit 1
+          fi
+          printf '%s\n' "$line" | sha256sum -c --quiet -
+          tar -xzf "$name.tar.gz"
+          got=$("$dir/$name/riskelle" version)
+          case $got in
+            "riskelle $RISKELLE_VERSION" | "riskelle $RISKELLE_VERSION ("*) ;;
+            *) echo "riskelle: the downloaded binary reports '$got', want $RISKELLE_VERSION" >&2; exit 1 ;;
+          esac
+          echo "$got"
+          echo "##vso[task.prependpath]$dir/$name"
+        displayName: Install riskelle ${{ parameters.version }}
+        env:
+          RISKELLE_VERSION: ${{ parameters.version }}
+          RISKELLE_RELEASES: ${{ parameters.releases }}
+
+      - bash: |
+          # riskelle: score and publish
+          set -euo pipefail
+          pr="${SYSTEM_COLLECTIONURI%/}/$SYSTEM_TEAMPROJECTID/_apis/git/repositories/$BUILD_REPOSITORY_ID/pullRequests/$SYSTEM_PULLREQUEST_PULLREQUESTID"
+          api="api-version=7.0"
+          out="$AGENT_TEMPDIRECTORY/riskelle"
+          mkdir -p "$out"
+          # ado METHOD URL [BODY_FILE]: one REST call, its response in
+          # $out/response.json; any answer but 2xx fails it.
+          ado() {
+            local code
+            code=$(curl -sS -X "$1" -o "$out/response.json" -w '%{http_code}' \
+              -H "Authorization: Bearer $SYSTEM_ACCESSTOKEN" -H "Content-Type: application/json" \
+              ${3:+--data-binary "@$3"} "$2")
+            [[ $code == 2?? ]] && return 0
+            echo "riskelle: $1 $2 answered $code; on 401 or 403, grant the build service 'Contribute to pull requests' on the repository" >&2
+            return 1
+          }
+          status() {
+            jq -n --arg state "$1" --arg description "$2" \
+              --arg url "${SYSTEM_COLLECTIONURI%/}/$SYSTEM_TEAMPROJECTID/_build/results?buildId=$BUILD_BUILDID" \
+              '{state: $state, description: $description, context: {genre: "riskelle", name: "score"}, targetUrl: $url}' \
+              > "$out/status.json"
+            ado POST "$pr/statuses?$api" "$out/status.json"
+          }
+          # The PR's own head against its target's tip, the refs a developer
+          # scores locally; not the merge commit ADO checks out.
+          base="origin/${SYSTEM_PULLREQUEST_TARGETBRANCH#refs/heads/}"
+          head="$SYSTEM_PULLREQUEST_SOURCECOMMITID"
+          if ! git rev-parse --verify --quiet "$base^{commit}" > /dev/null ||
+            ! git rev-parse --verify --quiet "$head^{commit}" > /dev/null ||
+            ! riskelle score --base "$base" --head "$head" > "$out/riskelle.risk-report.json" ||
+            ! riskelle score --format markdown --base "$base" --head "$head" > "$out/comment.md"; then
+            echo "riskelle: could not score $base..$head; both must be in the checkout (fetchDepth: 0)" >&2
+            status error "riskelle could not score this change" || true
+            exit 1
+          fi
+          echo "##vso[artifact.upload artifactname=riskelle]$out/riskelle.risk-report.json"
+          band=$(jq -r '"\(.level), \(.total)/100"' "$out/riskelle.risk-report.json")
+          status succeeded "$band"
+          # One summary thread, found by its property: the lowest live id.
+          ado GET "$pr/threads?$api"
+          found=$(jq -r '[.value[] | select((.isDeleted | not) and .properties["riskelle.summary"] != null)]
+            | sort_by(.id) | first | if . == null then "" else "\(.id) \([.comments[].id] | min)" end' "$out/response.json")
+          if [[ -n $found ]]; then
+            read -r thread comment <<< "$found"
+            jq -n --rawfile content "$out/comment.md" '{content: $content}' > "$out/body.json"
+            ado PATCH "$pr/threads/$thread/comments/$comment?$api" "$out/body.json"
+          else
+            jq -n --rawfile content "$out/comment.md" \
+              '{comments: [{parentCommentId: 0, content: $content, commentType: "text"}], status: "closed",
+                properties: {"riskelle.summary": {"$type": "System.String", "$value": "1"}}}' > "$out/body.json"
+            ado POST "$pr/threads?$api" "$out/body.json"
+          fi
+          echo "riskelle: $band"
+        displayName: Score and publish
+        env:
+          SYSTEM_ACCESSTOKEN: $(System.AccessToken)

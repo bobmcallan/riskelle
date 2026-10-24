@@ -106,10 +106,70 @@ under `"context"` (JSON) or "Where it lands (context, not scored)" (Markdown),
 labelled as context that does not count towards the score. The same result
 always prints the same bytes.
 
-With [satelle](https://github.com/bobmcallan/satelle), the estimate and the
-actual are recorded on the story, so the developer and the agent work the
-number down together, and a plan reviewer can send a high estimate back to be
-split.
+## With satelle
+
+With [satelle](https://github.com/bobmcallan/satelle), a story carries its
+riskelle estimate from planning, which the developer and the agent work down,
+and its actual score from the real diff; a High estimate is sent back to be
+split. riskelle itself knows nothing of satelle: the wiring below is a few
+shell commands (they need `jq`) and one coded satelle gate.
+
+**Install.** Copy `integrations/satelle/riskelle-risk-review.md` into the
+repo's `.satelle/skills/`, then add its gate to the workflow beside satelle's
+own `satelle-estimate-actual-review` gate (keep that one too):
+
+```toml
+[[gate]]
+skill = "riskelle-risk-review"
+on = ["in_progress", "<last state before the branch lands>", "done"]
+for = ["*"]
+```
+
+and run `satelle workflow validate`.
+
+**Tags.** The figures sit in the story's tags, next to satelle's own
+`estimate-*` and `actual-*`:
+
+| Tag | Holds |
+| --- | --- |
+| `estimate-risk:<total>` | the estimate's total, 0-100 |
+| `estimate-risk-level:<level>` | the estimate's level: low, medium or high |
+| `actual-risk:<total>` | the real diff's total, 0-100 |
+| `actual-risk-level:<level>` | the real diff's level |
+
+**Estimate at planning**, before requesting `plan → in_progress` (re-run it
+whenever the plan changes; it replaces the previous figure):
+
+```sh
+riskelle estimate plan.json > risk-estimate.json
+satelle story set <id> --remove-tags estimate-risk:,estimate-risk-level:
+satelle story set <id> --add-tags "estimate-risk:$(jq .total risk-estimate.json),estimate-risk-level:$(jq -r '.level|ascii_downcase' risk-estimate.json)"
+satelle story attach <id> --name risk-estimate --type output --file risk-estimate.json
+```
+
+**Actual before it lands**, in the story's tree, before the branch merges into
+the target (once it has landed, the merge base is the head and the diff is
+empty):
+
+```sh
+riskelle score --base <target> --head HEAD > risk-actual.json
+satelle story set <id> --remove-tags actual-risk:,actual-risk-level:
+satelle story set <id> --add-tags "actual-risk:$(jq .total risk-actual.json),actual-risk-level:$(jq -r '.level|ascii_downcase' risk-actual.json)"
+satelle story attach <id> --name risk-actual --type output --file risk-actual.json
+```
+
+The attached reports keep the riskelle version and rules hash behind each
+figure.
+
+**A High estimate** is refused at `in_progress` until the story is split. The
+one exit is a developer's decision, taken from their own terminal (satelle
+refuses it from an agent session):
+`satelle story waive <id> --gate riskelle-risk-review --check high-estimate --reason "..."`.
+The gate reads that waiver from its payload and records it in its verdict
+notes; no other check of the gate can be waived.
+
+The gate's exact behaviour on each edge, including the estimate-beside-actual
+line it leaves for reviewers, is in the skill file itself.
 
 ## Rules
 
@@ -145,10 +205,12 @@ is the workflow to copy.
 
 To adopt it in a repository:
 
-1. While `bobmcallan/riskelle` is private: its owner allows Actions access from
-   the owner's other repositories (Settings, Actions, General, Access), and the
-   adopting repository stores a token that can read riskelle's releases as a
-   secret, passed as the action's `release-token`.
+1. While `bobmcallan/riskelle` is private, its releases cannot be downloaded
+   without a token (an unauthenticated download returns 404). Its owner allows
+   Actions access from the owner's other repositories (Settings, Actions,
+   General, Access), and the adopting repository stores a token that can read
+   riskelle's releases as a secret, passed as the action's `release-token`.
+   Inside `bobmcallan/riskelle` itself the default token is enough.
 2. Copy `.github/workflows/riskelle.yml` to `.github/workflows/` and replace
    `uses: ./` with `uses: bobmcallan/riskelle@vX.Y.Z`, setting `version` to the
    same tag. Keep its permissions (`pull-requests: write` and `statuses: write`
@@ -171,6 +233,54 @@ On the pull request:
   it locally byte for byte. The rules are read from the target branch.
 
 Pull requests from forks are not supported: their token cannot post.
+
+### Azure DevOps
+
+[`ado/riskelle.yml`](ado/riskelle.yml) is a job template that scores every
+pull request with a released riskelle. Its parameters and the permissions it
+needs are documented in the template's header comments. To adopt it:
+
+1. Reference the template from your pipeline, at the same release tag you run.
+   Through a GitHub service connection (`riskelle-github` here):
+
+   ```yaml
+   resources:
+     repositories:
+       - repository: riskelle
+         type: github
+         endpoint: riskelle-github
+         name: bobmcallan/riskelle
+         ref: refs/tags/vX.Y.Z
+
+   jobs:
+     - template: ado/riskelle.yml@riskelle
+       parameters:
+         version: vX.Y.Z
+   ```
+
+   Or copy `ado/riskelle.yml` into your repository and use
+   `- template: ado/riskelle.yml` with the same `version` parameter.
+2. Make the pipeline run on pull requests: on Azure Repos, add it as a
+   **Build validation** policy on the target branch (the job is skipped on any
+   build that is not for a pull request).
+3. Grant the project's build service identity **Contribute to pull requests**
+   on the repository, so the job can post the status and the comment.
+
+Each pull request build then gives:
+
+- a PR status `riskelle/score` whose description carries the band and total
+  (`Low, 7/100`). It is `succeeded` for every band (riskelle measures, it does
+  not gate) and `error` when the change could not be scored;
+- one summary comment, the Markdown report, updated in place on every push;
+- the JSON report as the build artifact `riskelle`.
+
+The pipeline scores the PR's own head commit against its target branch tip,
+not the merge commit ADO builds, so the result is what you get locally. To
+reproduce it, run the same release with the `base` and `head` SHAs from the
+report: `riskelle score --base <base> --head <head>`.
+
+Self-hosted agents need Linux (amd64 or arm64) with bash, git, curl, jq, tar
+and sha256sum, as Microsoft-hosted Ubuntu agents have.
 
 ## Releasing
 
