@@ -1,0 +1,15 @@
+# Built binaries and local reports
+/riskelle
+/dist/
+*.risk-report.json
+
+# Agent and developer tooling is personal setup, not repo/team bound
+.claude/
+.satelle/
+.grok/
+.pi/
+.codex/
+.gemini/
+.cursor/
+CLAUDE.md
+AGENTS.md
