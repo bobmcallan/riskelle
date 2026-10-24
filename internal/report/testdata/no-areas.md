@@ -1,5 +1,7 @@
 ## riskelle score: 0 / 100, Low
 
+Diff of head `2222222222222222222222222222222222222222` against base `1111111111111111111111111111111111111111`, from their merge base.
+
 | Measure | Fact | Value | Band from | Points |
 | --- | --- | ---: | ---: | ---: |
 | tests | untested_production_files | 0 | 0 | 0 |

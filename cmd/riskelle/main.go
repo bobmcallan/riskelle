@@ -19,6 +19,8 @@ import (
 const usage = `usage: riskelle <command>
 
 commands:
+  score [--format json|markdown] --base <ref> --head <ref>
+            score the change from the merge base of base and head to head
   estimate [--format json|markdown] <plan.json>
             score a planned change from a plan file (format: README.md, Plan file)
   version   print the riskelle version
@@ -37,6 +39,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	switch args[0] {
+	case "score":
+		return scoreCmd(args[1:], stdout, stderr)
 	case "estimate":
 		return estimateCmd(args[1:], stdout, stderr)
 	case "version":
@@ -71,6 +75,46 @@ func flags(fs *flag.FlagSet, args []string, stderr io.Writer) (format string, ok
 		return "", false
 	}
 	return format, true
+}
+
+// scoreCmd scores the real diff, from the merge base of base and head to
+// head, of the repository in the current directory, with the rules read at
+// the resolved base (the target branch tip) by rules.Score.
+func scoreCmd(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("score", flag.ContinueOnError)
+	base := fs.String("base", "", "")
+	head := fs.String("head", "", "")
+	format, ok := flags(fs, args, stderr)
+	if !ok {
+		return 2
+	}
+	if *base == "" || *head == "" {
+		fmt.Fprintf(stderr, "riskelle: score needs --base and --head\n%s", usage)
+		return 2
+	}
+	if fs.NArg() != 0 {
+		fmt.Fprintf(stderr, "riskelle: score takes no arguments\n%s", usage)
+		return 2
+	}
+	fail := func(err error) int {
+		fmt.Fprintf(stderr, "riskelle: score: %v\n", err)
+		return 1
+	}
+	ctx := context.Background()
+	f, err := facts.Collect(ctx, ".", *base, *head)
+	if err != nil {
+		return fail(err)
+	}
+	res, err := rules.Score(ctx, ".", f)
+	if err != nil {
+		return fail(err)
+	}
+	r := report.New(report.KindScore, res)
+	r.Base, r.Head = f.Base, f.Head
+	if err := report.Write(stdout, format, r); err != nil {
+		return fail(err)
+	}
+	return 0
 }
 
 // estimateCmd scores the plan file, for the repository in the current

@@ -95,11 +95,13 @@ naming the plan file in `"plan"`.
 
 ### Report
 
-`riskelle estimate` prints its report as JSON by default, or as a Markdown
-summary for a PR comment with `--format markdown` (flags go before the plan
-file). Both carry the total and level, every breakdown entry with the facts
-behind it, and the provenance (riskelle version, rules source, rules commit
-and hash); an estimate is marked as one. The sensitive areas the change lands in sit apart,
+`riskelle score` and `riskelle estimate` print their report as JSON by
+default, or as a Markdown summary for a PR comment with `--format markdown`
+(flags go before the plan file). Both carry the total and level, every
+breakdown entry with the facts behind it, and the provenance (riskelle
+version, rules source, rules commit and hash). A score names the full base
+and head commits it measured (`"base"`, `"head"`); an estimate is marked as
+one and names its plan file. The sensitive areas the change lands in sit apart,
 under `"context"` (JSON) or "Where it lands (context, not scored)" (Markdown),
 labelled as context that does not count towards the score. The same result
 always prints the same bytes.

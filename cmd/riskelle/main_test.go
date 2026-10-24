@@ -27,6 +27,14 @@ func TestRun(t *testing.T) {
 		{"estimate with an unknown format", []string{"estimate", "--format", "xml", "a.json"}, 2, "", `unknown format "xml"`},
 		{"estimate with a format and no plan", []string{"estimate", "--format", "markdown"}, 2, "", "one plan file"},
 		{"estimate with an unknown flag", []string{"estimate", "--bogus", "a.json"}, 2, "", "-bogus"},
+		{"score without refs", []string{"score"}, 2, "", "needs --base and --head"},
+		{"score without head", []string{"score", "--base", "main"}, 2, "", "needs --base and --head"},
+		{"score without base", []string{"score", "--head", "main"}, 2, "", "needs --base and --head"},
+		{"score with an argument", []string{"score", "--base", "main", "--head", "x", "extra"}, 2, "", "takes no arguments"},
+		{"score with an unknown format", []string{"score", "--format", "xml", "--base", "a", "--head", "b"}, 2, "", `unknown format "xml"`},
+		{"score with an unknown flag", []string{"score", "--bogus"}, 2, "", "-bogus"},
+		{"score with a flag missing its value", []string{"score", "--base"}, 2, "", "-base"},
+		{"score with an unresolvable ref", []string{"score", "--base", "no-such-ref-xyz", "--head", "HEAD"}, 1, "", "no-such-ref-xyz"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

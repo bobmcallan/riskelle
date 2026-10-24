@@ -63,7 +63,7 @@ func estimateFixture() Report {
 }
 
 func noAreasFixture() Report {
-	return New(KindScore, score.Result{
+	r := New(KindScore, score.Result{
 		Total: 0, Level: score.Low,
 		Breakdown: []score.Point{
 			{Measure: score.MeasureTests, Fact: "untested_production_files", From: []string{}},
@@ -71,6 +71,9 @@ func noAreasFixture() Report {
 		Provenance: score.Provenance{Version: "v0.11.0", RulesSource: "built-in",
 			RulesCommit: provenance.RulesCommit, RulesHash: provenance.RulesHash},
 	})
+	r.Base = "1111111111111111111111111111111111111111"
+	r.Head = "2222222222222222222222222222222222222222"
+	return r
 }
 
 func render(t *testing.T, format string, r Report) []byte {
@@ -127,13 +130,17 @@ func TestReportCarriesResult(t *testing.T) {
 		t.Errorf("context note = %q, want %q", got.Context.Note, Note)
 	}
 	none := render(t, "json", noAreasFixture())
-	for _, s := range []string{`"kind": "score"`, `"areas": []`, `"note": "` + Note} {
+	for _, s := range []string{`"kind": "score"`, `"base": "` + strings.Repeat("1", 40) + `"`,
+		`"head": "` + strings.Repeat("2", 40) + `"`, `"areas": []`, `"note": "` + Note} {
 		if !bytes.Contains(none, []byte(s)) {
 			t.Errorf("no-areas JSON lacks %s:\n%s", s, none)
 		}
 	}
 	if bytes.Contains(none, []byte(`"plan"`)) {
 		t.Errorf("score JSON names a plan:\n%s", none)
+	}
+	if est := render(t, "json", estimateFixture()); bytes.Contains(est, []byte(`"base"`)) || bytes.Contains(est, []byte(`"head"`)) {
+		t.Errorf("estimate JSON names a base or head:\n%s", est)
 	}
 }
 

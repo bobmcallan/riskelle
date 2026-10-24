@@ -30,6 +30,8 @@ const Note = "Where the change lands is context for reviewers; it does not count
 type Report struct {
 	Kind       string           `json:"kind"`           // KindScore or KindEstimate
 	Plan       string           `json:"plan,omitempty"` // estimate only: the plan file as given
+	Base       string           `json:"base,omitempty"` // score only: full SHA the base ref resolved to
+	Head       string           `json:"head,omitempty"` // score only: full SHA the head ref resolved to
 	Total      int              `json:"total"`
 	Level      score.Level      `json:"level"`
 	Breakdown  []score.Point    `json:"breakdown"`
@@ -86,6 +88,9 @@ func (r Report) Markdown(w io.Writer) error {
 	fmt.Fprintf(&b, "## riskelle %s: %d / 100, %s\n\n", r.Kind, r.Total, r.Level)
 	if r.Plan != "" {
 		fmt.Fprintf(&b, "Estimate from plan %s, not a measured diff.\n\n", code(r.Plan))
+	}
+	if r.Base != "" {
+		fmt.Fprintf(&b, "Diff of head %s against base %s, from their merge base.\n\n", code(r.Head), code(r.Base))
 	}
 
 	b.WriteString("| Measure | Fact | Value | Band from | Points |\n| --- | --- | ---: | ---: | ---: |\n")
