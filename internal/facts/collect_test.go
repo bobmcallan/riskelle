@@ -67,6 +67,7 @@ func newFixture(t *testing.T) fixture {
 	runGit(t, dir, "switch", "--quiet", "-c", "feature")
 	write(t, dir, "app/main.go", "package main\n\nfunc main() { run() }\nfunc run() {}\n")
 	write(t, dir, "web/src/new.js", "a\nb\nc\nd\n")
+	write(t, dir, "web/src/new.test.js", "t\n")
 	write(t, dir, "bin/data.bin", "\x00\x01\x02\x03")
 	if err := os.MkdirAll(filepath.Join(dir, "docs", "guide"), 0o755); err != nil {
 		t.Fatal(err)
@@ -100,10 +101,11 @@ func TestCollect(t *testing.T) {
 		Files: []File{
 			{Path: "app/main.go", Added: 2, Removed: 1},
 			{Path: "bin/data.bin", Binary: true},
-			{Path: "docs/guide/new.md", OldPath: "docs/old.md", Added: 1},
+			{Path: "docs/guide/new.md", OldPath: "docs/old.md", Added: 1, Classes: []Class{ClassDocs}},
 			{Path: "logo.png", Binary: true},
 			{Path: "svc/Program.cs", Removed: 3},
 			{Path: "web/src/new.js", Added: 4},
+			{Path: "web/src/new.test.js", Added: 1, Classes: []Class{ClassTest}},
 		},
 		Directories: []string{".", "app", "bin", "docs", "docs/guide", "svc", "web/src"},
 		Projects:    []string{"app", "svc", "web"},

@@ -44,6 +44,10 @@ func Collect(ctx context.Context, repo, base, head string) (Facts, error) {
 	if err != nil {
 		return Facts{}, err
 	}
+	// A file is classified by its head path; a rename's old path is not.
+	for i := range files {
+		files[i].Classes = Classify(files[i].Path)
+	}
 
 	roots := map[string]bool{}
 	for _, commit := range []string{mergeBase, headSHA} {

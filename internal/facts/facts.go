@@ -11,11 +11,12 @@ import (
 
 // File is one changed file and its line counts.
 type File struct {
-	Path    string `json:"path"`               // path at head, slash-separated, repo-relative
-	OldPath string `json:"old_path,omitempty"` // path at base when renamed
-	Added   int    `json:"added"`
-	Removed int    `json:"removed"`
-	Binary  bool   `json:"binary,omitempty"` // git reported no line counts; Added and Removed are 0
+	Path    string  `json:"path"`               // path at head, slash-separated, repo-relative
+	OldPath string  `json:"old_path,omitempty"` // path at base when renamed
+	Added   int     `json:"added"`
+	Removed int     `json:"removed"`
+	Binary  bool    `json:"binary,omitempty"`  // git reported no line counts; Added and Removed are 0
+	Classes []Class `json:"classes,omitempty"` // path classes from Classify; nil when none
 }
 
 // Facts are the collected facts about one change. Every slice is sorted and

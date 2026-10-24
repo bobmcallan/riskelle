@@ -98,7 +98,7 @@ func TestCollectFactsFromAFixtureRepository(t *testing.T) {
 		`"merge_base":"` + fixtureGit(t, dir, "rev-parse", "main~1") + `",` +
 		`"head":"` + fixtureGit(t, dir, "rev-parse", "topic") + `",` +
 		`"files":[` +
-		`{"path":"notes/done/todo.md","old_path":"notes/todo.md","added":0,"removed":0},` +
+		`{"path":"notes/done/todo.md","old_path":"notes/todo.md","added":0,"removed":0,"classes":["docs"]},` +
 		`{"path":"pkg/a.go","added":1,"removed":1},` +
 		`{"path":"ui/app.js","added":1,"removed":0},` +
 		`{"path":"ui/icon.ico","added":0,"removed":0,"binary":true}],` +
