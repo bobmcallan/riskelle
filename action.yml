@@ -3,8 +3,8 @@ description: Score a pull request with a released riskelle, installed by that re
 
 inputs:
   version:
-    description: The riskelle release to score with, a vX.Y.Z tag, v0.19.0 or later (the first release with install.sh). It pins the scale.
-    required: true
+    description: The riskelle release to score with, latest (the default, the latest release as curl | sh installs it) or a vX.Y.Z tag, v0.19.0 or later (the first release with install.sh), to pin the scale.
+    default: latest
   token:
     description: Token that posts the status and the comment (statuses write, pull-requests write).
     default: ${{ github.token }}
@@ -31,12 +31,20 @@ runs:
       run: |
         # riskelle: install
         set -euo pipefail
-        [[ $RISKELLE_VERSION =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::version '$RISKELLE_VERSION' is not a vX.Y.Z tag"; exit 1; }
+        version=$RISKELLE_VERSION
+        if [[ $version == latest ]]; then
+          src="$RISKELLE_REPO_URL/releases/latest/download"
+          unset RISKELLE_VERSION # install.sh resolves the latest tag, as curl | sh does
+        elif [[ $version =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          src="$RISKELLE_REPO_URL/releases/download/$version"
+        else
+          echo "::error::version '$version' is neither latest nor a vX.Y.Z tag"; exit 1
+        fi
         [[ $RUNNER_OS == Linux ]] || { echo "::error::riskelle's action runs on Linux runners, not $RUNNER_OS"; exit 1; }
         dir="$RUNNER_TEMP/riskelle"
         rm -rf "$dir" && mkdir -p "$dir"
-        curl -fsSL -o "$dir/install.sh" "$RISKELLE_REPO_URL/releases/download/$RISKELLE_VERSION/install.sh" ||
-          { echo "::error::riskelle $RISKELLE_VERSION has no install.sh release asset; the action installs v0.19.0 or later"; exit 1; }
+        curl -fsSL -o "$dir/install.sh" "$src/install.sh" ||
+          { echo "::error::riskelle $version has no install.sh release asset; the action installs v0.19.0 or later"; exit 1; }
         RISKELLE_INSTALL_DIR="$dir/bin" sh "$dir/install.sh"
         echo "$dir/bin" >>"$GITHUB_PATH"
     - name: score and post

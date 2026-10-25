@@ -83,13 +83,13 @@ func buildRiskelle(t *testing.T, dir string, flags ...string) string {
 }
 
 // TestADOTemplate pins the wiring only an agent runs (PR builds only, full
-// history, a pinned version, where releases come from, the token) and that it
+// history, the version, latest by default, where releases come from, the token) and that it
 // never names id4me or the retired releases parameter.
 func TestADOTemplate(t *testing.T) {
 	raw, _ := os.ReadFile(adoTemplate)
 	for _, want := range []string{
 		"condition: and(succeeded(), eq(variables['Build.Reason'], 'PullRequest'))",
-		"- checkout: self\n        fetchDepth: 0\n", "  - name: version\n    type: string\n  - name: pool",
+		"- checkout: self\n        fetchDepth: 0\n", "  - name: version\n    type: string\n    default: latest\n  - name: pool",
 		"SYSTEM_ACCESSTOKEN: $(System.AccessToken)", "RISKELLE_VERSION: ${{ parameters.version }}",
 		"RISKELLE_REPO_URL: ${{ parameters.repository }}",
 	} {
@@ -108,14 +108,15 @@ func TestADOTemplate(t *testing.T) {
 var pipelineRefusals = []struct{ name, version, stderr string }{
 	{"version not a tag", "0.0.1", "vX.Y.Z"},
 	{"empty version", "", "vX.Y.Z"},
+	{"neither latest nor a tag", "Latest", "vX.Y.Z"},
 	{"release without install.sh", "v0.0.9", "v0.19.0 or later"},
 	{"checksum mismatch", "v0.0.3", "checksum mismatch"},
 	{"no checksum line", "v0.0.4", "has no line for"},
 }
 
 // TestADOInstallStep runs the template's install step against a stand-in
-// release: the pinned version's own install.sh puts that version on the
-// PATH, and every refusal fails the step with nothing on the PATH.
+// release: latest installs the latest release, the pinned version's own
+// install.sh puts that version on the PATH, and every refusal fails the step with nothing on the PATH.
 func TestADOInstallStep(t *testing.T) {
 	script := adoScript(t, "# riskelle: install")
 	repo := standInRelease(t)
@@ -130,6 +131,13 @@ func TestADOInstallStep(t *testing.T) {
 	}
 	if got := installedVersion(t, filepath.Join(m[0][1], "riskelle")); got != "v0.0.1" {
 		t.Errorf("riskelle on the prepended path reports %q, want v0.0.1", got)
+	}
+	code, stdout, stderr = install("latest")
+	if m = prepend.FindAllStringSubmatch(stdout, -1); code != 0 || len(m) != 1 {
+		t.Fatalf("install latest: exit %d, stdout %q, stderr %q; want one ##vso[task.prependpath]", code, stdout, stderr)
+	}
+	if got := installedVersion(t, filepath.Join(m[0][1], "riskelle")); got != "v0.0.2" {
+		t.Errorf("latest: riskelle on the prepended path reports %q, want the latest release v0.0.2", got)
 	}
 	for _, tt := range pipelineRefusals {
 		code, stdout, stderr := install(tt.version)

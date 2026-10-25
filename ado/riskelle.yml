@@ -1,10 +1,11 @@
 # riskelle for Azure DevOps: a job template that scores each pull request,
 # posts the band as the PR status riskelle/score and keeps one summary comment
 # up to date. Adoption and what it posts: README.md, "Azure DevOps".
-# Parameters: version (required, a vX.Y.Z tag, v0.19.0 or later); pool (a
+# Parameters: version (default latest, the latest release; or a vX.Y.Z tag,
+# v0.19.0 or later, to pin the scale); pool (a
 # Linux amd64/arm64 agent with bash, git, curl, jq, tar, sha256sum);
 # repository (where releases are read from, <repository>/releases/download/
-# <version>/, for a mirror). riskelle is installed by that release's own
+# <version>/, for a mirror). riskelle is installed by the chosen release's own
 # install.sh, as a developer installs it; no token is needed to download it.
 # The build service needs "Contribute to pull requests" to post. The scripts
 # read only environment variables, never pipeline macros, so they run
@@ -13,6 +14,7 @@
 parameters:
   - name: version
     type: string
+    default: latest
   - name: pool
     type: object
     default:
@@ -34,15 +36,21 @@ jobs:
       - bash: |
           # riskelle: install
           set -euo pipefail
-          if [[ ! $RISKELLE_VERSION =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "riskelle: version '$RISKELLE_VERSION' is not a release tag vX.Y.Z" >&2
+          version=$RISKELLE_VERSION
+          if [[ $version == latest ]]; then
+            src="$RISKELLE_REPO_URL/releases/latest/download"
+            unset RISKELLE_VERSION # install.sh resolves the latest tag, as curl | sh does
+          elif [[ $version =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            src="$RISKELLE_REPO_URL/releases/download/$version"
+          else
+            echo "riskelle: version '$version' is neither latest nor a release tag vX.Y.Z" >&2
             exit 1
           fi
-          dir="$AGENT_TEMPDIRECTORY/riskelle-$RISKELLE_VERSION"
+          dir="$AGENT_TEMPDIRECTORY/riskelle-$version"
           rm -rf "$dir"
           mkdir -p "$dir"
-          if ! curl -fsSL -o "$dir/install.sh" "$RISKELLE_REPO_URL/releases/download/$RISKELLE_VERSION/install.sh"; then
-            echo "riskelle: $RISKELLE_VERSION has no install.sh release asset; the template installs v0.19.0 or later" >&2
+          if ! curl -fsSL -o "$dir/install.sh" "$src/install.sh"; then
+            echo "riskelle: $version has no install.sh release asset; the template installs v0.19.0 or later" >&2
             exit 1
           fi
           RISKELLE_INSTALL_DIR="$dir/bin" sh "$dir/install.sh"

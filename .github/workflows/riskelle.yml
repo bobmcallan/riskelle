@@ -1,9 +1,10 @@
 name: riskelle
 
-# riskelle scores every pull request with a released binary: a "riskelle"
-# status carrying the band, and one summary comment kept up to date. Adopters
-# copy this file, replacing `uses: ./` with `uses: bobmcallan/riskelle@<tag>`
-# (README.md, GitHub pull requests).
+# riskelle scores every pull request with the latest released binary: a
+# "riskelle" status carrying the band, and one summary comment kept up to date.
+# Adopters copy this file, replacing `uses: ./` with
+# `uses: bobmcallan/riskelle@<tag>`, and may set the action's version input to
+# a vX.Y.Z tag to pin the scale (README.md, GitHub pull requests).
 on:
   pull_request: {}
 
@@ -24,5 +25,3 @@ jobs:
         with:
           fetch-depth: 0
       - uses: ./
-        with:
-          version: v0.19.0

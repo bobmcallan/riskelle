@@ -218,9 +218,10 @@ Every report records the riskelle version and the rules hash it was scored with.
 ### GitHub pull requests
 
 The action in `action.yml` scores every pull request with a **released**
-riskelle, installed by that release's own `install.sh` (the developer install,
-pinned to the action's `version` input and checked against the release's
-checksums file, never built from the PR), posts a `riskelle` commit status on
+riskelle, installed by that release's own `install.sh` (the developer install:
+the latest release by default, as `curl | sh` installs it, or the tag in the
+action's `version` input, checked against the release's checksums file, never
+built from the PR), posts a `riskelle` commit status on
 the PR head, and keeps one summary comment on the PR, updated in place on each
 push. riskelle's own `.github/workflows/riskelle.yml` runs it and is the
 workflow to copy. The repository is public, so installing needs no token.
@@ -228,9 +229,9 @@ workflow to copy. The repository is public, so installing needs no token.
 To adopt it in a repository:
 
 1. Copy `.github/workflows/riskelle.yml` to `.github/workflows/` and replace
-   `uses: ./` with `uses: bobmcallan/riskelle@vX.Y.Z`, setting the `version`
-   input to the same tag (v0.19.0 or later, the first release with
-   `install.sh`). Keep its permissions (`pull-requests: write` and
+   `uses: ./` with `uses: bobmcallan/riskelle@vX.Y.Z`. The `version` input is
+   optional: left out, it is `latest`; set it to a tag (v0.19.0 or later, the
+   first release with `install.sh`) to pin the scale. Keep its permissions (`pull-requests: write` and
    `statuses: write` for the default token, which posts the status and the
    comment), `fetch-depth: 0` (the merge base, branch age and trunk drift need
    history) and its concurrency group.
@@ -248,8 +249,8 @@ On the pull request:
   deleted; other comments are never touched.
 - The base is the target branch's tip and the head is the PR head commit (not
   GitHub's merge commit), both named in full on the report, so
-  `riskelle score --base <base> --head <head>` with the same release reproduces
-  it locally byte for byte. The rules are read from the target branch.
+  `riskelle score --base <base> --head <head>` with the release the report
+  names reproduces it locally byte for byte. The rules are read from the target branch.
 
 Pull requests from forks are not supported: their token cannot post.
 
@@ -257,7 +258,8 @@ Pull requests from forks are not supported: their token cannot post.
 
 [`ado/riskelle.yml`](ado/riskelle.yml) is a job template that scores every
 pull request with a released riskelle, installed by that release's own
-`install.sh` pinned to the template's `version` parameter (v0.19.0 or later).
+`install.sh`: the latest release by default, or the tag in the template's
+`version` parameter (v0.19.0 or later) to pin the scale.
 The repository is public, so installing needs no token. Its parameters and the
 permissions it needs are documented in the template's header comments. To
 adopt it:
@@ -276,12 +278,12 @@ adopt it:
 
    jobs:
      - template: ado/riskelle.yml@riskelle
-       parameters:
-         version: vX.Y.Z
    ```
 
+   Add `parameters: { version: vX.Y.Z }` to pin the release.
+
    Or copy `ado/riskelle.yml` into your repository and use
-   `- template: ado/riskelle.yml` with the same `version` parameter.
+   `- template: ado/riskelle.yml`, optionally with a `version` parameter.
 2. Make the pipeline run on pull requests: on Azure Repos, add it as a
    **Build validation** policy on the target branch (the job is skipped on any
    build that is not for a pull request).
@@ -298,8 +300,8 @@ Each pull request build then gives:
 
 The pipeline scores the PR's own head commit against its target branch tip,
 not the merge commit ADO builds, so the result is what you get locally. To
-reproduce it, run the same release with the `base` and `head` SHAs from the
-report: `riskelle score --base <base> --head <head>`.
+reproduce it, run the release the report names with the `base` and `head`
+SHAs from the report: `riskelle score --base <base> --head <head>`.
 
 Self-hosted agents need Linux (amd64 or arm64) with bash, git, curl, jq, tar
 and sha256sum, as Microsoft-hosted Ubuntu agents have.

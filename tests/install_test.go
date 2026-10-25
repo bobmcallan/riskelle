@@ -20,7 +20,8 @@ const installScript = "../scripts/install.sh"
 
 // standInRelease serves, from a local httptest server, the part of GitHub
 // scripts/install.sh reads: /releases/latest redirecting to the latest tag
-// (v0.0.2), and /releases/download/<tag>/ holding each tag's archive, laid
+// (v0.0.2), /releases/latest/download/<asset> redirecting to that asset of the
+// latest tag, as GitHub does, and /releases/download/<tag>/ holding each tag's archive, laid
 // out as scripts/release.sh makes it, its checksums file and install.sh (a
 // copy of scripts/install.sh, as release.sh attaches it, which the pipelines
 // fetch). v0.0.3's checksums carry a wrong hash and v0.0.4's have no line for
@@ -61,6 +62,9 @@ func standInRelease(t *testing.T) string {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/releases/latest", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/releases/tag/v0.0.2", http.StatusFound)
+	})
+	mux.HandleFunc("/releases/latest/download/", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/releases/download/v0.0.2/"+strings.TrimPrefix(r.URL.Path, "/releases/latest/download/"), http.StatusFound)
 	})
 	mux.HandleFunc("/releases/tag/", func(w http.ResponseWriter, r *http.Request) {})
 	mux.Handle("/releases/download/", http.StripPrefix("/releases/download/", http.FileServer(http.Dir(releases))))

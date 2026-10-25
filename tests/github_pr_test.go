@@ -240,9 +240,10 @@ func TestGitHubPullRequest(t *testing.T) {
 }
 
 // TestActionInstallStep runs action.yml's install step as the runner does,
-// against a stand-in release: it needs no release token, the pinned
-// version's own install.sh puts that version in the directory it adds to
-// GITHUB_PATH, and every refusal fails the step with nothing added.
+// against a stand-in release: it needs no release token, version defaults to
+// latest, which installs the latest release, the pinned version's own
+// install.sh puts that version in the directory it adds to GITHUB_PATH, and
+// every refusal fails the step with nothing added.
 func TestActionInstallStep(t *testing.T) {
 	for _, tool := range []string{"bash", "curl", "tar"} {
 		if _, err := exec.LookPath(tool); err != nil || runtime.GOOS != "linux" {
@@ -254,6 +255,10 @@ func TestActionInstallStep(t *testing.T) {
 		if strings.Contains(string(raw), gone) {
 			t.Errorf("action.yml still names %q", gone)
 		}
+	}
+	input, _, _ := strings.Cut(strings.SplitN(string(raw), "  version:\n", 2)[1], "  token:\n")
+	if !strings.Contains(input, "    default: latest\n") || strings.Contains(input, "required: true") {
+		t.Errorf("action.yml's version input %q is not optional with the default latest", input)
 	}
 	script := stepScript(t, "../action.yml", "run: |\n        # riskelle: install\n", "        ")
 	if strings.Contains(script, "${{") {
@@ -284,10 +289,39 @@ func TestActionInstallStep(t *testing.T) {
 	if got := installedVersion(t, filepath.Join(path[0], "riskelle")); got != "v0.0.1" {
 		t.Errorf("riskelle in %s reports %q, want v0.0.1", path[0], got)
 	}
+	code, out, path = install("latest")
+	if code != 0 || len(path) != 1 {
+		t.Fatalf("install latest: exit %d, GITHUB_PATH %q, output %q; want one directory added", code, path, out)
+	}
+	if got := installedVersion(t, filepath.Join(path[0], "riskelle")); got != "v0.0.2" {
+		t.Errorf("latest: riskelle in %s reports %q, want the latest release v0.0.2", path[0], got)
+	}
 	for _, tt := range pipelineRefusals {
 		code, out, path := install(tt.version)
 		if code == 0 || len(path) != 0 || !strings.Contains(out, tt.stderr) {
 			t.Errorf("%s: exit %d, GITHUB_PATH %q, output %q; want a failure naming %q with nothing added", tt.name, code, path, out, tt.stderr)
 		}
+	}
+}
+
+// TestOwnWorkflowUsesLatest keeps riskelle's own pull request workflow on the
+// action's default, the latest release: no version pin under its step.
+func TestOwnWorkflowUsesLatest(t *testing.T) {
+	raw, err := os.ReadFile("../.github/workflows/riskelle.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	uses := false
+	for _, line := range strings.Split(string(raw), "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "#") {
+			continue
+		}
+		uses = uses || line == "      - uses: ./"
+		if strings.Contains(line, "version:") {
+			t.Errorf("riskelle.yml pins a version: %q", line)
+		}
+	}
+	if !uses {
+		t.Errorf("riskelle.yml does not run the action with `- uses: ./`")
 	}
 }
