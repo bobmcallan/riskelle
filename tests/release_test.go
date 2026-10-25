@@ -117,9 +117,11 @@ func TestReleaseScriptBuildsEveryTarget(t *testing.T) {
 		t.Fatalf("scripts/release.sh: %v", err)
 	}
 
-	// AC1 + AC2: exactly one archive per target plus the checksums file.
+	// AC1 + AC2: exactly one archive per target plus the checksums file and
+	// the installer.
 	sums := "riskelle_" + version + "_checksums.txt"
-	want := []string{sums}
+	const installer = "install.sh"
+	want := []string{sums, installer}
 	for _, tg := range releaseTargets {
 		ext := ".tar.gz"
 		if tg.os == "windows" {
@@ -154,7 +156,7 @@ func TestReleaseScriptBuildsEveryTarget(t *testing.T) {
 		listed[name] = hash
 	}
 	for _, name := range want {
-		if name == sums {
+		if name == sums || name == installer {
 			continue
 		}
 		data, err := os.ReadFile(filepath.Join(a, name))
@@ -166,8 +168,21 @@ func TestReleaseScriptBuildsEveryTarget(t *testing.T) {
 			t.Errorf("checksum for %s = %q, want %x", name, listed[name], h)
 		}
 	}
-	if len(listed) != len(want)-1 {
-		t.Errorf("checksums file lists %d files, want %d", len(listed), len(want)-1)
+	if len(listed) != len(releaseTargets) {
+		t.Errorf("checksums file lists %d files, want one per archive, %d", len(listed), len(releaseTargets))
+	}
+
+	// The install.sh asset is scripts/install.sh, byte for byte.
+	gotInstaller, err := os.ReadFile(filepath.Join(a, installer))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantInstaller, err := os.ReadFile(filepath.Join(repo, "scripts", installer))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(gotInstaller, wantInstaller) {
+		t.Errorf("release %s differs from scripts/%s", installer, installer)
 	}
 
 	// AC2: each archive holds one directory with the binary and the README.

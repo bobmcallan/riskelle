@@ -7,7 +7,10 @@
 # checksums file. For every target it cross-compiles ./cmd/riskelle with the
 # version stamped in, packs the binary and README.md into
 # riskelle_<version>_<os>_<arch>.tar.gz (.zip on windows), and writes
-# riskelle_<version>_checksums.txt (sha256sum format) beside them.
+# riskelle_<version>_checksums.txt (sha256sum format) beside them. It also
+# copies scripts/install.sh beside them as the install.sh asset, which
+# releases/latest/download/install.sh serves; the checksums file lists only
+# the archives.
 #
 # The output depends only on the commit: the tree must be clean, the Go
 # toolchain comes from go.mod, and every timestamp is the commit time, so a
@@ -75,4 +78,5 @@ for target in "${targets[@]}"; do
 done
 
 (cd "$out" && LC_ALL=C sha256sum -- "${archives[@]}" >"riskelle_${version}_checksums.txt")
-echo "release.sh: wrote ${#archives[@]} archives and riskelle_${version}_checksums.txt to $out"
+cp scripts/install.sh "$out/install.sh"
+echo "release.sh: wrote ${#archives[@]} archives, riskelle_${version}_checksums.txt and install.sh to $out"

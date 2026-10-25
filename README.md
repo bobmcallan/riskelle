@@ -4,6 +4,25 @@ A deterministic risk score for every code change, so developers and agents can
 see — before, during and after the work — how risky a change is, and aim to make
 each one smaller.
 
+## Install
+
+```sh
+curl -fsSL https://github.com/bobmcallan/riskelle/releases/latest/download/install.sh | sh
+```
+
+It installs the latest release for Linux or macOS (amd64 or arm64) into
+`~/.local/bin`, after checking the archive against the release's checksums
+file, and prints the installed version. `RISKELLE_VERSION=vX.Y.Z` pins a
+release and `RISKELLE_INSTALL_DIR` picks the directory, both in front of `sh`
+(`… | RISKELLE_VERSION=vX.Y.Z sh`); the header of
+[`scripts/install.sh`](scripts/install.sh) documents the rest.
+
+Or build it from source with the Go version in `go.mod`:
+`go install github.com/bobmcallan/riskelle/cmd/riskelle@latest`, or
+`go build -o ~/.local/bin/riskelle ./cmd/riskelle` from a clone. A build from
+a clone reports its version as `dev`; release builds are stamped by
+`scripts/release.sh`.
+
 ## Intent
 
 Risk is about **the change itself**: how big it is, how much existing code it
@@ -294,8 +313,9 @@ git push origin vX.Y.Z
 The tag runs `.github/workflows/release.yml`. It builds every target with
 `scripts/release.sh` (the owner of the target list and archive layout), checks
 that the linux/amd64 binary reports the tag as its version, and attaches the
-archives and `riskelle_vX.Y.Z_checksums.txt` to a GitHub Release named after
-the tag. A tag whose commit is not on `main` fails the run. A pushed tag is
+archives, `riskelle_vX.Y.Z_checksums.txt` and `install.sh` (the installer,
+served at `releases/latest/download/install.sh`) to a GitHub Release named
+after the tag. A tag whose commit is not on `main` fails the run. A pushed tag is
 never moved: a broken release is fixed forward with the next patch version.
 
 Verify a download:
