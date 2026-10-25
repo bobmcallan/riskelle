@@ -200,7 +200,9 @@ line it leaves for reviewers, is in the skill file itself.
   areas). It is read from the **target branch**, so a change cannot alter its
   own rules. Anything that would lower a score is refused by name. A change
   that edits `.risk/` is scored like any other change: riskelle does not try
-  to guard against a dishonest developer.
+  to guard against a dishonest developer. riskelle's own
+  [`.risk/rules.json`](.risk/rules.json) is an example: it adds areas for the
+  scorer and the release pipelines, and marks the report goldens generated.
 
 Every report records the riskelle version and the rules hash it was scored with.
 
@@ -317,6 +319,8 @@ archives, `riskelle_vX.Y.Z_checksums.txt` and `install.sh` (the installer,
 served at `releases/latest/download/install.sh`) to a GitHub Release named
 after the tag. A tag whose commit is not on `main` fails the run. A pushed tag is
 never moved: a broken release is fixed forward with the next patch version.
+Once the Release is published, the workflow's `pages` job publishes this README
+as the project site at https://bobmcallan.github.io/riskelle/.
 
 Verify a download:
 
