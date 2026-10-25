@@ -4,7 +4,6 @@ package tests
 
 import (
 	"bytes"
-	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -22,6 +21,27 @@ import (
 
 const adoTemplate = "../ado/riskelle.yml"
 
+// stepScript returns the YAML block scalar in file that follows opener,
+// with indent removed from each line: the exact script a pipeline step runs.
+// It ends at the first non-blank line that is not indented by indent.
+func stepScript(t *testing.T, file, opener, indent string) string {
+	t.Helper()
+	raw, _ := os.ReadFile(file)
+	_, after, ok := strings.Cut(string(raw), opener)
+	if !ok {
+		t.Fatalf("%s: no step opening %q", file, opener)
+	}
+	var lines []string
+	for _, l := range strings.Split(after, "\n") {
+		body, in := strings.CutPrefix(l, indent)
+		if !in && strings.TrimSpace(l) != "" {
+			break
+		}
+		lines = append(lines, body)
+	}
+	return strings.Join(lines, "\n")
+}
+
 // adoScript returns the template's `- bash: |` step whose first line is
 // marker, unindented: the exact script an agent runs. A pipeline macro in it
 // fails the test: the scripts read only the environment.
@@ -32,19 +52,9 @@ func adoScript(t *testing.T, marker string) string {
 			t.Skipf("the template runs on Linux agents with %s", tool)
 		}
 	}
-	raw, _ := os.ReadFile(adoTemplate)
-	_, after, ok := strings.Cut(string(raw), "- bash: |\n          "+marker+"\n")
-	var lines []string
-	for _, l := range strings.Split(after, "\n") {
-		body, in := strings.CutPrefix(l, "          ")
-		if !in && strings.TrimSpace(l) != "" {
-			break
-		}
-		lines = append(lines, body)
-	}
-	script := strings.Join(lines, "\n")
-	if m := regexp.MustCompile(`\$\{\{|\$\([A-Za-z_][A-Za-z0-9_.]*\)`).FindString(script); !ok || m != "" {
-		t.Fatalf("%s: no bash step %q, or it uses the pipeline macro %q", adoTemplate, marker, m)
+	script := stepScript(t, adoTemplate, "- bash: |\n          "+marker+"\n", "          ")
+	if m := regexp.MustCompile(`\$\{\{|\$\([A-Za-z_][A-Za-z0-9_.]*\)`).FindString(script); m != "" {
+		t.Fatalf("%s: bash step %q uses the pipeline macro %q", adoTemplate, marker, m)
 	}
 	return script
 }
@@ -73,58 +83,58 @@ func buildRiskelle(t *testing.T, dir string, flags ...string) string {
 }
 
 // TestADOTemplate pins the wiring only an agent runs (PR builds only, full
-// history, a pinned version, the token) and that it never names id4me.
+// history, a pinned version, where releases come from, the token) and that it
+// never names id4me or the retired releases parameter.
 func TestADOTemplate(t *testing.T) {
 	raw, _ := os.ReadFile(adoTemplate)
 	for _, want := range []string{
 		"condition: and(succeeded(), eq(variables['Build.Reason'], 'PullRequest'))",
 		"- checkout: self\n        fetchDepth: 0\n", "  - name: version\n    type: string\n  - name: pool",
 		"SYSTEM_ACCESSTOKEN: $(System.AccessToken)", "RISKELLE_VERSION: ${{ parameters.version }}",
+		"RISKELLE_REPO_URL: ${{ parameters.repository }}",
 	} {
 		if !strings.Contains(string(raw), want) || strings.Contains(strings.ToLower(string(raw)), "id4me") {
 			t.Errorf("%s lacks %q or names id4me", adoTemplate, want)
 		}
 	}
+	if strings.Contains(string(raw), "parameters.releases") || strings.Contains(string(raw), "RISKELLE_RELEASES") {
+		t.Errorf("%s still reads the retired releases parameter", adoTemplate)
+	}
 }
 
-// TestADOInstallStep installs from a release laid out as scripts/release.sh
-// makes it, served from file://: the pinned version lands on the PATH, and a
-// bad version, a missing checksum line or a mismatch puts nothing there.
+// pipelineRefusals are the releases each pipeline's install step must refuse
+// against standInRelease, failing the step with nothing put on the PATH, and
+// what its stderr must name. v0.0.3 is the checksum mismatch.
+var pipelineRefusals = []struct{ name, version, stderr string }{
+	{"version not a tag", "0.0.1", "vX.Y.Z"},
+	{"empty version", "", "vX.Y.Z"},
+	{"release without install.sh", "v0.0.9", "v0.19.0 or later"},
+	{"checksum mismatch", "v0.0.3", "checksum mismatch"},
+	{"no checksum line", "v0.0.4", "has no line for"},
+}
+
+// TestADOInstallStep runs the template's install step against a stand-in
+// release: the pinned version's own install.sh puts that version on the
+// PATH, and every refusal fails the step with nothing on the PATH.
 func TestADOInstallStep(t *testing.T) {
 	script := adoScript(t, "# riskelle: install")
-	const version = "v9.9.9"
-	name := "riskelle_" + version + "_linux_" + runtime.GOARCH
-	stage, releases := t.TempDir(), t.TempDir()
-	buildRiskelle(t, filepath.Join(stage, name), "-ldflags", "-X github.com/bobmcallan/riskelle/internal/version.version="+version)
-	dir := filepath.Join(releases, version)
-	os.Mkdir(dir, 0o755)
-	if out, err := exec.Command("tar", "-czf", filepath.Join(dir, name+".tar.gz"), "-C", stage, name).CombinedOutput(); err != nil {
-		t.Fatalf("tar: %v\n%s", err, out)
-	}
-	tgz, _ := os.ReadFile(filepath.Join(dir, name+".tar.gz"))
-	good := fmt.Sprintf("%064d  other.zip\n%x  %s.tar.gz\n", 0, sha256.Sum256(tgz), name)
+	repo := standInRelease(t)
 	prepend := regexp.MustCompile(`(?m)^##vso\[task\.prependpath\](.+)$`)
-	install := func(version, checksums string) (int, string) {
-		writeFile(t, dir, "riskelle_v9.9.9_checksums.txt", checksums)
-		code, stdout, _ := runADOScript(t, script, t.TempDir(), "RISKELLE_VERSION="+version, "RISKELLE_RELEASES=file://"+releases)
-		return code, stdout
+	install := func(version string) (int, string, string) {
+		return runADOScript(t, script, t.TempDir(), "HOME="+t.TempDir(), "RISKELLE_VERSION="+version, "RISKELLE_REPO_URL="+repo)
 	}
-	code, stdout := install(version, good)
-	m := prepend.FindStringSubmatch(stdout)
-	if code != 0 || m == nil {
-		t.Fatalf("install: exit %d, stdout %q; want a ##vso[task.prependpath]", code, stdout)
+	code, stdout, stderr := install("v0.0.1")
+	m := prepend.FindAllStringSubmatch(stdout, -1)
+	if code != 0 || len(m) != 1 {
+		t.Fatalf("install: exit %d, stdout %q, stderr %q; want one ##vso[task.prependpath]", code, stdout, stderr)
 	}
-	if out, err := exec.Command(filepath.Join(m[1], "riskelle"), "version").Output(); err != nil || strings.Fields(string(out))[1] != version {
-		t.Errorf("installed riskelle version: %q, %v; want %s", out, err, version)
+	if got := installedVersion(t, filepath.Join(m[0][1], "riskelle")); got != "v0.0.1" {
+		t.Errorf("riskelle on the prepended path reports %q, want v0.0.1", got)
 	}
-	for _, tt := range []struct{ name, version, sums string }{
-		{"version not a tag", "9.9.9", good},
-		{"unreleased version", "v9.9.8", good},
-		{"no line for the archive", version, strings.Replace(good, name, "other", 1)},
-		{"checksum mismatch", version, fmt.Sprintf("%064d  %s.tar.gz\n", 0, name)},
-	} {
-		if code, stdout := install(tt.version, tt.sums); code == 0 || prepend.MatchString(stdout) {
-			t.Errorf("%s: exit %d, stdout %q; want a failure with nothing on the PATH", tt.name, code, stdout)
+	for _, tt := range pipelineRefusals {
+		code, stdout, stderr := install(tt.version)
+		if code == 0 || prepend.MatchString(stdout) || !strings.Contains(stderr, tt.stderr) {
+			t.Errorf("%s: exit %d, stdout %q, stderr %q; want a failure naming %q with nothing on the PATH", tt.name, code, stdout, stderr, tt.stderr)
 		}
 	}
 }

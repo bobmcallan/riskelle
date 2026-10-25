@@ -218,26 +218,24 @@ Every report records the riskelle version and the rules hash it was scored with.
 ### GitHub pull requests
 
 The action in `action.yml` scores every pull request with a **released**
-riskelle binary (downloaded from GitHub Releases and checked against the
-release's checksums file, never built from the PR), posts a `riskelle` commit
-status on the PR head, and keeps one summary comment on the PR, updated in
-place on each push. riskelle's own `.github/workflows/riskelle.yml` runs it and
-is the workflow to copy.
+riskelle, installed by that release's own `install.sh` (the developer install,
+pinned to the action's `version` input and checked against the release's
+checksums file, never built from the PR), posts a `riskelle` commit status on
+the PR head, and keeps one summary comment on the PR, updated in place on each
+push. riskelle's own `.github/workflows/riskelle.yml` runs it and is the
+workflow to copy. The repository is public, so installing needs no token.
 
 To adopt it in a repository:
 
-1. While `bobmcallan/riskelle` is private, its releases cannot be downloaded
-   without a token (an unauthenticated download returns 404). Its owner allows
-   Actions access from the owner's other repositories (Settings, Actions,
-   General, Access), and the adopting repository stores a token that can read
-   riskelle's releases as a secret, passed as the action's `release-token`.
-   Inside `bobmcallan/riskelle` itself the default token is enough.
-2. Copy `.github/workflows/riskelle.yml` to `.github/workflows/` and replace
-   `uses: ./` with `uses: bobmcallan/riskelle@vX.Y.Z`, setting `version` to the
-   same tag. Keep its permissions (`pull-requests: write` and `statuses: write`
-   for the default token), `fetch-depth: 0` (the merge base, branch age and
-   trunk drift need history) and its concurrency group.
-3. Inputs and outputs (`total`, `level`) are described in `action.yml`.
+1. Copy `.github/workflows/riskelle.yml` to `.github/workflows/` and replace
+   `uses: ./` with `uses: bobmcallan/riskelle@vX.Y.Z`, setting the `version`
+   input to the same tag (v0.19.0 or later, the first release with
+   `install.sh`). Keep its permissions (`pull-requests: write` and
+   `statuses: write` for the default token, which posts the status and the
+   comment), `fetch-depth: 0` (the merge base, branch age and trunk drift need
+   history) and its concurrency group.
+2. Inputs (`version`, `token`, `repository`) and outputs (`total`, `level`) are
+   described in `action.yml`.
 
 On the pull request:
 
@@ -258,8 +256,11 @@ Pull requests from forks are not supported: their token cannot post.
 ### Azure DevOps
 
 [`ado/riskelle.yml`](ado/riskelle.yml) is a job template that scores every
-pull request with a released riskelle. Its parameters and the permissions it
-needs are documented in the template's header comments. To adopt it:
+pull request with a released riskelle, installed by that release's own
+`install.sh` pinned to the template's `version` parameter (v0.19.0 or later).
+The repository is public, so installing needs no token. Its parameters and the
+permissions it needs are documented in the template's header comments. To
+adopt it:
 
 1. Reference the template from your pipeline, at the same release tag you run.
    Through a GitHub service connection (`riskelle-github` here):

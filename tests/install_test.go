@@ -21,12 +21,18 @@ const installScript = "../scripts/install.sh"
 // standInRelease serves, from a local httptest server, the part of GitHub
 // scripts/install.sh reads: /releases/latest redirecting to the latest tag
 // (v0.0.2), and /releases/download/<tag>/ holding each tag's archive, laid
-// out as scripts/release.sh makes it, and its checksums file. v0.0.3's
-// checksums carry a wrong hash and v0.0.4's have no line for the archive.
-// It returns the server's URL, the repository URL the script is given.
+// out as scripts/release.sh makes it, its checksums file and install.sh (a
+// copy of scripts/install.sh, as release.sh attaches it, which the pipelines
+// fetch). v0.0.3's checksums carry a wrong hash and v0.0.4's have no line for
+// the archive. It returns the server's URL, the repository URL the script is
+// given.
 func standInRelease(t *testing.T) string {
 	t.Helper()
 	stage, releases := t.TempDir(), t.TempDir()
+	installer, err := os.ReadFile(installScript)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, tag := range []string{"v0.0.1", "v0.0.2", "v0.0.3", "v0.0.4"} {
 		name := "riskelle_" + tag + "_" + runtime.GOOS + "_" + runtime.GOARCH
 		buildRiskelle(t, filepath.Join(stage, name), "-ldflags", "-X github.com/bobmcallan/riskelle/internal/version.version="+tag)
@@ -49,6 +55,7 @@ func standInRelease(t *testing.T) string {
 			line = ""
 		}
 		writeFile(t, dir, "riskelle_"+tag+"_checksums.txt", fmt.Sprintf("%064d  riskelle_%s_windows_amd64.zip\n", 1, tag)+line)
+		writeFile(t, dir, "install.sh", string(installer))
 	}
 
 	mux := http.NewServeMux()

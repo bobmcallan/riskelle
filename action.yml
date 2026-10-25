@@ -1,16 +1,16 @@
 name: riskelle
-description: Score a pull request with a released riskelle binary, post a riskelle status carrying the band, and keep one summary comment up to date.
+description: Score a pull request with a released riskelle, installed by that release's install.sh, post a riskelle status carrying the band, and keep one summary comment up to date.
 
 inputs:
   version:
-    description: The riskelle release to score with, a vX.Y.Z tag. It pins the scale.
+    description: The riskelle release to score with, a vX.Y.Z tag, v0.19.0 or later (the first release with install.sh). It pins the scale.
     required: true
   token:
     description: Token that posts the status and the comment (statuses write, pull-requests write).
     default: ${{ github.token }}
-  release-token:
-    description: Token that can read bobmcallan/riskelle's releases. While riskelle is private, another repository passes a secret here.
-    default: ${{ github.token }}
+  repository:
+    description: The repository riskelle releases are read from, for a mirror; its releases/download/<version>/ holds install.sh.
+    default: https://github.com/bobmcallan/riskelle
 
 outputs:
   total:
@@ -26,29 +26,19 @@ runs:
     - name: install riskelle
       shell: bash
       env:
-        GH_TOKEN: ${{ inputs.release-token }}
-        VERSION: ${{ inputs.version }}
+        RISKELLE_VERSION: ${{ inputs.version }}
+        RISKELLE_REPO_URL: ${{ inputs.repository }}
       run: |
+        # riskelle: install
         set -euo pipefail
-        [[ $VERSION =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::version '$VERSION' is not a vX.Y.Z tag"; exit 1; }
+        [[ $RISKELLE_VERSION =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::version '$RISKELLE_VERSION' is not a vX.Y.Z tag"; exit 1; }
         [[ $RUNNER_OS == Linux ]] || { echo "::error::riskelle's action runs on Linux runners, not $RUNNER_OS"; exit 1; }
-        case $RUNNER_ARCH in
-          X64) arch=amd64 ;;
-          ARM64) arch=arm64 ;;
-          *) echo "::error::no riskelle release for runner arch $RUNNER_ARCH"; exit 1 ;;
-        esac
-        name="riskelle_${VERSION}_linux_${arch}"
         dir="$RUNNER_TEMP/riskelle"
         rm -rf "$dir" && mkdir -p "$dir"
-        gh release download "$VERSION" --repo bobmcallan/riskelle --dir "$dir" \
-          --pattern "$name.tar.gz" --pattern "riskelle_${VERSION}_checksums.txt"
-        (cd "$dir" && sha256sum -c --ignore-missing "riskelle_${VERSION}_checksums.txt")
-        tar -xzf "$dir/$name.tar.gz" -C "$dir"
-        bin="$dir/$name/riskelle"
-        got=$("$bin" version)
-        [[ $got == "riskelle $VERSION "* ]] || { echo "::error::downloaded binary reports '$got'"; exit 1; }
-        echo "$got"
-        echo "RISKELLE_BIN=$bin" >>"$GITHUB_ENV"
+        curl -fsSL -o "$dir/install.sh" "$RISKELLE_REPO_URL/releases/download/$RISKELLE_VERSION/install.sh" ||
+          { echo "::error::riskelle $RISKELLE_VERSION has no install.sh release asset; the action installs v0.19.0 or later"; exit 1; }
+        RISKELLE_INSTALL_DIR="$dir/bin" sh "$dir/install.sh"
+        echo "$dir/bin" >>"$GITHUB_PATH"
     - name: score and post
       id: score
       shell: bash

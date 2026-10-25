@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -145,8 +146,16 @@ func TestGitHubPullRequest(t *testing.T) {
 		writeFile(t, tmp, "gh.json", string(raw))
 		cmd := exec.Command("bash", script)
 		cmd.Dir = dir
-		cmd.Env = append(os.Environ(), "PATH="+ghDir+string(os.PathListSeparator)+os.Getenv("PATH"),
-			"RISKELLE_FAKE_GH="+statePath, "RISKELLE_BIN="+bin, "GITHUB_REPOSITORY=o/r", "PR_NUMBER=7",
+		// riskelle on the PATH, as the action's install step leaves it, and
+		// no RISKELLE_BIN: the action no longer sets one.
+		var env []string
+		for _, kv := range os.Environ() {
+			if !strings.HasPrefix(kv, "RISKELLE_BIN=") {
+				env = append(env, kv)
+			}
+		}
+		cmd.Env = append(env, "PATH="+ghDir+string(os.PathListSeparator)+filepath.Dir(bin)+string(os.PathListSeparator)+os.Getenv("PATH"),
+			"RISKELLE_FAKE_GH="+statePath, "GITHUB_REPOSITORY=o/r", "PR_NUMBER=7",
 			"BASE_REF="+baseRef, "HEAD_SHA="+head, "GITHUB_SERVER_URL=https://github.example", "GITHUB_RUN_ID=42",
 			"GITHUB_OUTPUT="+output, "GITHUB_STEP_SUMMARY="+summary, "RUNNER_TEMP="+tmp)
 		log, _ := cmd.CombinedOutput()
@@ -227,5 +236,58 @@ func TestGitHubPullRequest(t *testing.T) {
 		"description": "riskelle failed; see the run", "target_url": "https://github.example/o/r/actions/runs/42"}}
 	if code != 1 || len(st.Comments) != 0 || !reflect.DeepEqual(st.Statuses, want) {
 		t.Errorf("failure: exit %d, comments %+v, statuses %v; want exit 1, no comment, %v", code, st.Comments, st.Statuses, want)
+	}
+}
+
+// TestActionInstallStep runs action.yml's install step as the runner does,
+// against a stand-in release: it needs no release token, the pinned
+// version's own install.sh puts that version in the directory it adds to
+// GITHUB_PATH, and every refusal fails the step with nothing added.
+func TestActionInstallStep(t *testing.T) {
+	for _, tool := range []string{"bash", "curl", "tar"} {
+		if _, err := exec.LookPath(tool); err != nil || runtime.GOOS != "linux" {
+			t.Skipf("the action runs on Linux runners with %s", tool)
+		}
+	}
+	raw, _ := os.ReadFile("../action.yml")
+	for _, gone := range []string{"release-token", "RISKELLE_BIN", "gh release download"} {
+		if strings.Contains(string(raw), gone) {
+			t.Errorf("action.yml still names %q", gone)
+		}
+	}
+	script := stepScript(t, "../action.yml", "run: |\n        # riskelle: install\n", "        ")
+	if strings.Contains(script, "${{") {
+		t.Fatalf("action.yml's install step uses an expression; it must read only its env")
+	}
+	repo := standInRelease(t)
+	install := func(version string) (code int, stderr string, path []string) {
+		t.Helper()
+		tmp := t.TempDir()
+		pathFile := filepath.Join(tmp, "github_path")
+		writeFile(t, tmp, "github_path", "")
+		cmd := exec.Command("bash", "-c", script)
+		for _, kv := range os.Environ() {
+			if !strings.HasPrefix(kv, "HOME=") && !strings.HasPrefix(kv, "RISKELLE_") && !strings.HasPrefix(kv, "GH_TOKEN=") && !strings.HasPrefix(kv, "GITHUB_TOKEN=") {
+				cmd.Env = append(cmd.Env, kv)
+			}
+		}
+		cmd.Env = append(cmd.Env, "HOME="+tmp, "RISKELLE_VERSION="+version, "RISKELLE_REPO_URL="+repo,
+			"RUNNER_OS=Linux", "RUNNER_TEMP="+tmp, "GITHUB_PATH="+pathFile)
+		out, _ := cmd.CombinedOutput()
+		added, _ := os.ReadFile(pathFile)
+		return cmd.ProcessState.ExitCode(), string(out), strings.Fields(string(added))
+	}
+	code, out, path := install("v0.0.1")
+	if code != 0 || len(path) != 1 {
+		t.Fatalf("install: exit %d, GITHUB_PATH %q, output %q; want one directory added", code, path, out)
+	}
+	if got := installedVersion(t, filepath.Join(path[0], "riskelle")); got != "v0.0.1" {
+		t.Errorf("riskelle in %s reports %q, want v0.0.1", path[0], got)
+	}
+	for _, tt := range pipelineRefusals {
+		code, out, path := install(tt.version)
+		if code == 0 || len(path) != 0 || !strings.Contains(out, tt.stderr) {
+			t.Errorf("%s: exit %d, GITHUB_PATH %q, output %q; want a failure naming %q with nothing added", tt.name, code, path, out, tt.stderr)
+		}
 	}
 }
