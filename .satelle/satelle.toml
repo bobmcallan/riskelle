@@ -1,0 +1,287 @@
+# satelle.toml — per-repo config (committed, secret-free). Every setting has a
+# default, so this file may stay fully commented; uncomment a key to override.
+# Per-user overrides go in satelle.local.toml beside this file (gitignored).
+
+# data_dir = ".satelle"          # authored substrate home under the repo (default)
+# db = ""                        # override DB path; default is home-keyed
+#                                # ~/.satelle/<repo-key>/satelle.db (sty_4660bbe1).
+#                                # An explicit path wins; otherwise runtime state
+#                                # (db, logs, backups, stories cache) lives outside
+#                                # the repo. Migrate a legacy in-repo DB with
+#                                # 'satelle runtime migrate'.
+# log_level = "info"             # debug | info | warn | error (default info)
+# logs_max_size_kb = 5120        # roll a runtime log file past this size (default 5 MiB). Logs live in ~/.satelle/<repo-key>/logs; .satelle/logs is a symlink pointer to it.
+# logs_max_files = 7             # keep at most this many rotated log files (default 7)
+
+# Archive retention for CLOSED-story attachment dirs under the runtime stories/
+# cache (~/.satelle/<repo-key>/stories). Unset (default) = keep everything.
+# The two compose — either triggers pruning. A NON-terminal (open/engaged)
+# story's dir is ALWAYS kept. Pruned dirs are MOVED to runtime backups/stories/
+# (never deleted in place).
+# stories_keep_closed = 50       # keep the N most-recently-updated closed-story dirs
+# stories_keep_days = 90         # drop a closed story's dir older than N days
+
+# [review] — create gate. Default ON (sty_83782ffb): creation is where
+# misclassification is cheapest to catch. gate_create runs the deterministic
+# structure check plus the workflow's create_review skill (embedded default:
+# satelle-story-create-review — content, alignment, and classification). Needs
+# an agent CLI for the LLM half (see 'satelle agent'). Set false to opt out.
+[review]
+gate_create = true
+
+# [tags.vocabulary] — controlled tag namespaces (optional). A tag in a listed
+# namespace must use a declared value (case-insensitive match; stored in the
+# casing declared here). Namespaces absent from the table stay free-form.
+# Unset = every tag free-form (zero-config). Declare per-repo; never compiled
+# into the binary (sty_034d843c).
+# [tags.vocabulary]
+# surface = ["ui", "cli"]
+
+# [categories] — controlled story TYPE vocabulary (optional). Default list ships
+# embedded (feature/fix/chore/…/substrate/epic-parent/parent); satelle.toml may
+# extend (extra) or replace (vocabulary). enforce: off | warn | reject
+# (default warn — upgrade never hard-breaks existing flows). Category is TYPE,
+# not a surface (use [tags.vocabulary] surface for interfaces).
+# [categories]
+# enforce = "warn"
+# extra = ["my-type"]
+# vocabulary = ["feature", "fix", "chore"]
+
+# [gate] — edit-gate exemptions and the single-story process rule. This is the
+# ONE table seeded ACTIVE (not commented) below, because it is the source of
+# truth for which paths escape the engaged-story edit gate — configuration, not
+# a Go rule (the constitution: configuration over code).
+# edit_exempt_paths lists repo-root-relative (or absolute) path prefixes whose
+# edits are exempt from the engaged-story edit gate. It is the SOLE exemption
+# source — the binary does NOT special-case the data dir or any managed path.
+# ".satelle/" is seeded so this repo's authored data and documents stay editable
+# without a story. A path under lock_substrate_paths (below) is never exempt,
+# whatever is listed here: the seeded ".satelle/" is overridden for locked
+# substrate (workflows/skills/agent bindings). See 'satelle help substrate'.
+# The rest of the seeded list is the footprint SATELLE ITSELF deploys, unasked:
+# the ".gitignore" managed block init/migrate write (sty_f115e6bf), and the
+# harness hook scaffolds init installs under ".claude/" and ".grok/"
+# — some of them lazily, mid-session, with no story engaged (sty_926cfcdc).
+# Exempting them is not leniency: without it the binary writes a file and then
+# its own stop gate refuses the session for the write, with no clean lane to
+# commit it. Drop any default to require an engaged story for those paths, or
+# add your own prefix (a harness authoring dir holding markdown rather than
+# product code). "/tmp/" is seeded so out-of-tree story drafts are writable
+# with no performing story; an outside-tree prefix never exempts a path
+# inside this repo (a checkout that lives under /tmp still gates product
+# code). Product paths stay gated — that is the point of the gate. An
+# explicitly empty list is a deliberate opt-out (everything gated) and is never
+# converged. Repos initialised before a path joined this list: run
+# satelle migrate --yes to append the missing entries without clobbering
+# operator additions.
+# How MANY stories may perform at once is NOT set here — see [engagement] below.
+# allow_outside_tree_edits (default false) opts INTO Bash/Edit mutations whose
+# targets land in another git working tree (sty_a8454d10 / sty_aadd4d6c).
+# Non-repo paths (temp, scratchpads) are never fenced. Leave false unless this
+# install deliberately spans multiple repos from one session — create stories
+# cross-repo stays allowed either way; progressing/mutating another tree does not.
+[gate]
+edit_exempt_paths = [".satelle/", ".gitignore", ".claude/", ".grok/", "/tmp/"]
+# edit_exempt_globs — filename globs (basename match at any depth; a pattern
+# containing / is matched against the repo-relative path). Seeded for agent
+# story-reference dumps. Narrow on purpose: a matching filename bypasses the
+# edit gate. Removing an entry re-gates that name.
+edit_exempt_globs = ["sty_*_body.md", "sty_*_ac.md"]
+
+# lock_substrate_paths — path prefixes the edit gate REFUSES to every session
+# not engaged in a substrate-lane story, whether or not any story is performing
+# (sty_992cffc6, sty_66abc0e3). It overrides edit_exempt_paths: without it an
+# edit could rewrite the workflows, skills and agent bindings that judge the
+# work, and the change would leave no trace in its engagement diff. The deny
+# names the locked path and the lane out — a story in the substrate lane
+# (category "substrate", judged by satelle-workflow-change-review) may change
+# substrate under its own seat. See 'satelle help substrate'.
+# The key is left commented on purpose: ABSENT means the default lock
+# (".satelle/"), so a repo is locked without it. Uncomment to pin or widen the
+# list. Never locked, whatever is listed: the process temp dir and /tmp,
+# edit_exempt_globs matches, and the footprint satelle deploys itself
+# (.gitignore, .claude/, .grok/, .pi/). An explicitly EMPTY list is the
+# documented opt-out, and 'satelle doctor' reports it. The lock covers shell
+# (Bash) mutations too.
+# lock_substrate_paths = [".satelle/"]
+
+# command_allow — OPT-IN step-scoped git policy (sty_c21490cc). Keys are git
+# subcommands; values are story statuses that may run them while engaged.
+# Absent/empty = no step restriction (commitgate only requires engagement).
+# Example: permit git push only at the release step:
+# [gate.command_allow]
+# push = ["release"]
+# allow_outside_tree_edits = false
+# command_rule — OPT-IN repo-authored judgement of an agent's shell command line
+# (sty_a74551d6). satelle ships no rule: with none authored nothing is refused or
+# warned. Each [[gate.command_rule]] has a pattern (a whitespace-split argv
+# prefix; a token of * matches any one token), an action ("deny" refuses the
+# command before it runs; "warn" lets it run and tells the agent, where the
+# harness can deliver that), allow (story statuses or workflow step names at
+# which the command passes; empty = never passes) and a message. The first
+# matching rule, in file order, wins. Best-effort: only the visible command line
+# is judged, so wrappers, eval, aliases and scripts bypass a rule. satelle
+# manages no identity or rights — the tool's own permissions and the account it
+# runs as enforce what a command may do. Example:
+# [[gate.command_rule]]
+# pattern = "TOOL delete"
+# action = "deny"
+# allow = ["in_progress"]
+# message = "delete changes shared state"
+# handoff — whether a gate-running verb called by an agent (or with no terminal)
+# returns a handle and delivers the verdict later by notification, instead of
+# holding the foreground. "auto" (default) hands off only when a configured
+# driver harness has a background cutoff under 1 minute (grok: 15s; claude's 120s
+# is above it, so a claude repo whose edges run longer sets "on");
+# "on" always hands off for such a caller; "off" always runs in the foreground.
+# SATELLE_GATE_MODE=interactive|agent overrides it. See satelle help agent-dispatch.
+# handoff = "auto"
+
+# [engagement] — SEAT CONCURRENCY: how many stories may perform at once.
+# "none" (default, and what you get with no section) is single occupancy: one
+# performing story, everything else refused. "epic" keys the seat on the story's
+# PARENT, so children of one parent may engage concurrently — each from its OWN
+# git working tree (a second engagement from an already-leased tree is refused,
+# and story diff is anchored to the tree its story was engaged from). A story
+# under a different parent, or none, is refused while such a seat is held.
+# Satelle arbitrates ENGAGEMENT only: how concurrent work converges (merge order,
+# suite runs, one push) is this repo's workflow, and satelle polices no
+# sibling contention. Only these two values are accepted.
+# riskelle: children of one epic run in parallel, each from its own worktree.
+[engagement]
+parallel = "epic"
+
+# [worktree] — what a worktree opened with 'satelle story worktree <id> --base
+# <ref>' needs. git worktree add carries only tracked content, so list the
+# gitignored paths (files or directories, repo-relative) this repo needs in a
+# tree; each is linked from the main tree, never copied. branch and path are
+# templates ({id} is the story id; a relative path resolves from the main tree);
+# with no template the --branch / --path flags are required. Nothing is declared
+# by default. See 'satelle help worktree'.
+# riskelle: every story is worked on story/<id> in its own tree beside the repo.
+# .claude is carried so the tree has the same hooks and permissions.
+[worktree]
+include = [".claude"]
+branch = "story/{id}"
+path = "../riskelle-trees/{id}"
+
+# riskelle: trunk based. The merge step publishes with `satelle trunk publish`,
+# which proves the combined head with this command before a plain push.
+[trunk]
+prove = "[ -f go.mod ] || exit 0; [ -z \"$(gofmt -l .)\" ] && go vet ./... && go test ./... && go test -tags integration ./..."
+publish_rounds = 5
+
+# substrate_roots — per-kind parent dir for authored markdown. Unset means
+# <data_dir>/<kind> (e.g. .satelle/documents). Point a kind elsewhere — even
+# outside .satelle/ — to author it at the repo root or another path:
+# [substrate_roots]
+# documents = "."                # → ./documents
+# skills = "."                   # → ./skills
+
+# [sync] — each .satelle area on the local|personal|shared ladder (scoped-sync).
+# Unset = local: nothing leaves the machine until an area is opted in.
+# Never syncs, at any scope: files with a .local segment (satelle.local.toml,
+# notes.local.md). Unconditional — no setting enables it; secrets stay put.
+# personal = this repo's hosted project (default: this directory's name).
+# shared = team catalog eligibility; use 'satelle publish' for the team catalog
+# (sync itself does not write to a team workspace). Inspect with 'satelle sync scopes'.
+# Continuity: local = your disk; personal = push backup + sync-down rehydrate for
+# the bound project. Whether .satelle process is git-tracked is the operator's
+# choice — satelle does not require it. Git is for the application repo.
+# Areas: documents, workflows, principles, skills, constitution, agents, tasks,
+# settings (satelle.toml, including [sync]), stories, ledger, executions.
+# Reserved keys: 'all' (blanket default), server, project, workspace, stale_after.
+# Unset server = https://satelle.dev. Unset project = this repo's directory name.
+# satelle login records the machine-wide server; satelle project bind <slug>
+# writes [sync] project when the directory name is not the slug you want.
+[sync]
+stale_after = "24h"
+# >>> satelle-example: enable sync (uncomment to opt in)
+# [sync]
+# all = "personal"               # every area personal unless overridden below
+# documents = "personal"         # per-area override wins over 'all'
+# project = "my-project-slug"    # default: this repo's directory name
+# workspace = "team-name"        # per-developer; usually satelle.local.toml
+# [vars]
+# MODEL_BASE_URL = "https://example.invalid"  # non-secret; secrets → satelle.local.toml
+# <<< satelle-example
+#
+# [backup] — pre-mutation substrate backup policy (sty_873a5380, sty_84f14ace).
+# Local copies under .satelle/backups/ always run before init/restore/rebase
+# overwrite an existing file. local_only suppresses the advisory about the
+# online option. hosted = true opts into pushing pre-images into the bound
+# project's personal documents partition (path backups/<rel>) — default off,
+# because that partition is listed by documents pull and backups/ is a restore
+# exclusion (auto-push permanently wedged sync; sty_84f14ace).
+# [backup]
+# local_only = true
+# hosted = true
+
+# [sync] project / workspace stay per-repo. Do not put server in this file —
+# the hosted origin is machine-scope (satelle settings --global server /
+# satelle login). satelle init and satelle migrate --yes re-home a leftover
+# repo hosted server onto the machine file and fold leftover hosted
+# project/workspace onto [sync], then drop the leftover hosted table.
+#
+# The local push-fed UI endpoint is machine-scope (~/.satelle/config.toml
+# [service] endpoint). Unset derives http://127.0.0.1:<port>. Disable with
+# SATELLE_SERVER_ENDPOINT=none. Do not put [server] endpoint in this file.
+#
+# [vars] — operator KV substituted into agents.toml binding env values via
+# ${NAME}. NON-secret vars may live here; SECRETS go in gitignored
+# satelle.local.toml (per-key overlay wins). Never pushed with substrate sync.
+
+# [output] — compact CLI rendering for the list/diff commands an agent pulls
+# through Bash(satelle:*) (sty_75b76691). A fold only ever applies when it
+# round-trips to the exact original and is smaller — otherwise the command
+# prints the same indented JSON it always has. Unset = off everywhere (this
+# table's zero value); a repo opts a verb in by name. compact_for_agents
+# makes that the default for a dispatched or in-loop agent caller
+# (SATELLE_SCRATCH or SATELLE_SESSION set, or an in-loop harness's own
+# session marker); --json on any command always forces
+# plain JSON regardless. noise_patterns are globs (basename match unless the
+# pattern contains "/") identifying generated/lockfile files a story diff
+# --patch offloads whole — the binary ships none of its own.
+# [output]
+# compact_for_agents = true
+# compact_commands = ["ledger-list", "story-list", "story-doc-list", "story-messages", "story-diff"]
+# long_cell_bytes = 200
+# repeat_min = 3
+# noise_patterns = ["go.sum"]
+
+# [output.diff_rank] — ranked diff compressor (sty_918e2086): the gate
+# payload's patch reducer (replacing an unranked byte cut), and — when
+# enabled — story diff --patch's own compact rendering. Disabled (unset, or
+# enabled = false) leaves diffPayloadCeiling's byte backstop as the only
+# reducer, as it always has been; the binary ships no threshold, cap, or
+# pattern of its own. --full always bypasses this for the raw patch.
+# [output.diff_rank]
+# enabled = true
+# passthrough_lines = 50           # a patch at or under this many lines rides unranked
+# max_files = 20                   # keep the N files with the most changed lines
+# max_hunks_per_file = 10          # per file: first, last, then top-scored up to N
+# context_lines = 2                # unchanged lines kept on each side of a change
+# priority_patterns = ["(?i)error", "(?i)todo|fixme|bug|fix", "(?i)security|auth|secret"]
+
+# [fix_lane] — the scoped in-loop fix lane (sty_4b694872): a driver may record a
+# typed claim ('satelle fix claim') and make ONE small, self-evident edit without
+# a full engage. The bound is repo configuration, never a number in the binary.
+# product_surface lists the path globs the lane may NEVER touch because they are
+# the shipped product (** = any depth; a glob with no / matches a basename).
+# Left empty the lane is CLOSED: every claim is refused (undeclared-bound) —
+# declare your product paths to open it. Gate skills, reviewer rubrics,
+# workflows, principles, the constitution and this config are always refused:
+# satelle derives them from where YOUR repo keeps its substrate (data_dir,
+# substrate_roots); the lists below ADD to them, never subtract. max_lines is the
+# largest size bound, in changed lines, a claim may declare (default from the
+# embedded fix_lane.toml). Existing values are never overwritten by init.
+# Analyse the lane with 'satelle fix report'. See 'satelle help fix-lane'.
+project = "riskelle"
+[fix_lane]
+product_surface = []
+# max_lines = 20
+# gate_skills = []
+# reviewer_rubrics = []
+# workflows = []
+# principles = []
+# repo_config = []

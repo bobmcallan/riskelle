@@ -1,0 +1,122 @@
+[meta]
+name = "step"
+type = "workflow"
+scope = "project"
+description = "riskelle's overlay on the shipped step catalogue. A step key replaces that baseline step; raised, authored, docs-verified, children-resolved, run and run-verified are not named and stay shipped. The [[gate]] list replaces the baseline gates, so the shipped ones riskelle keeps are restated here."
+
+# backlog → plan. The isolated planner runs BEFORE the entry gates (propose) and
+# returns the plan artifact; a Claude + GPT panel judges it and both seats must
+# accept. A rejected edge leaves the story in backlog, where its definition is
+# editable.
+[planned]
+status = "plan"
+agent = "planner"
+skills = ["plan"]
+propose = true
+reviewers = ["satelle-story-plan-review"]
+panel = ["reviewer", "reviewer-gpt"]
+combine = "satelle-panel-all-accept"
+reject_budget = 10
+requires = ["raised"]
+
+# plan → in_progress. The driving session implements the plan in the story's
+# worktree. The estimate gate ([[gate]] below) needs an estimate recorded first.
+[coded]
+status = "in_progress"
+agent = "executor"
+skills = ["code"]
+reject_budget = 10
+requires = ["planned"]
+
+# in_progress → integration. The code is judged by a Claude + GPT panel: each
+# reviewer skill runs once per seat, and the edge passes only when every seat
+# accepts. The deterministic build/format/vet/unit check is the one [[gate]]
+# kept for this step (see below).
+[integrated]
+status = "integration"
+agent = "executor"
+skills = ["integrate"]
+reviewers = ["riskelle-code-review", "satelle-story-scope-review"]
+panel = ["reviewer", "reviewer-gpt"]
+combine = "satelle-panel-all-accept"
+reject_budget = 10
+requires = ["coded"]
+
+# integration → merge. riskelle-integration-check runs the suite first and
+# short-circuits; then a Claude reviewer judges the tests the executor presented.
+[landed]
+status = "merge"
+agent = "executor"
+skills = ["merge"]
+reviewers = ["riskelle-integration-check", "riskelle-integration-review"]
+reviewer_agent = "reviewer"
+parallel = 0
+reject_budget = 10
+requires = ["integrated"]
+
+# merge → release. The deterministic riskelle-merged-check: the story's commits
+# must be on origin/main before a tag is cut.
+[released]
+status = "release"
+agent = "executor"
+skills = ["release"]
+reviewers = ["riskelle-merged-check"]
+reject_budget = 10
+requires = ["landed"]
+
+# release → done. A Claude reviewer judges the recorded release evidence, then
+# the shipped done review walks the acceptance criteria.
+[closed]
+status = "done"
+reviewers = ["riskelle-release-review", "satelle-story-done-review"]
+reviewer_agent = "reviewer"
+parallel = 0
+terminal = true
+reject_budget = 10
+requires = ["released"]
+
+# Substrate lane: authored in place, closed by the workflow-change, scope and
+# done reviews. Nothing to merge or release (.satelle is gitignored).
+[substrate-verified]
+status = "done"
+reviewers = ["satelle-workflow-change-review", "satelle-story-scope-review", "satelle-story-done-review"]
+reviewer_agent = "reviewer"
+parallel = 0
+terminal = true
+reject_budget = 10
+requires = ["authored"]
+
+# Kept always-on rather than in [integrated]'s reviewers: a step's panel seats
+# every reviewer skill once per seat, so listing this deterministic check there
+# would run the build and unit suite twice per presentation.
+[[gate]]
+skill = "riskelle-build-check"
+on = ["integration"]
+for = ["*"]
+
+# Restated shipped gates.
+[[gate]]
+skill = "satelle-step-summary"
+agent = "reviewer"
+mandatory = true
+for = ["*", "docs", "epic-parent", "parent", "substrate"]
+
+[[gate]]
+skill = "satelle-estimate-actual-review"
+on = ["in_progress", "done"]
+for = ["*"]
+
+# riskelle scores its own stories (dogfood): the released riskelle estimate is
+# required entering in_progress (a High is sent back to be split), the actual
+# score of the committed branch entering merge, before it lands.
+[[gate]]
+skill = "riskelle-risk-review"
+on = ["in_progress", "merge"]
+for = ["*"]
+
+[[gate]]
+skill = "satelle-instruction-change-review"
+agent = "reviewer"
+when = "satelle-instruction-change-trigger"
+on = ["done"]
+for = ["*", "docs", "substrate", "execution", "task"]

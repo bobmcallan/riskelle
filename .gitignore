@@ -5,7 +5,6 @@
 
 # Agent and developer tooling is personal setup, not repo/team bound
 .claude/
-.satelle/
 .grok/
 .pi/
 .codex/
@@ -20,4 +19,22 @@ AGENTS.md
 # Runtime state lives under ~/.satelle/<repo-key>/, outside the repo.
 sty_*_body.md
 sty_*_ac.md
+.satelle/**/.env
+.satelle/logs
+.satelle/hooks
+.satelle/deployed.version
+.satelle/*.local.toml
+.satelle/workflows/agents.local.toml
+.satelle/satelle
+.satelle/tasks/*/exe_*.md
+!.satelle/
 # <<< satelle (managed) <<<
+
+# Operator (2026-11-04): .satelle/ substrate is tracked in git. Task run
+# outputs, backups and any local/db state stay machine-local.
+.satelle/tasks/*/
+.satelle/backups/
+.satelle/**/*.bak
+.satelle/**/*.bak-*
+.satelle/**/*.local.*
+.satelle/**/*.db*
