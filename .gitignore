@@ -31,8 +31,12 @@ sty_*_ac.md
 # <<< satelle (managed) <<<
 
 # Operator (2026-11-04): .satelle/ substrate is tracked in git. Task run
-# outputs, backups and any local/db state stay machine-local.
-.satelle/tasks/*/
+# records/outputs, config bundles, backups and local/db state stay
+# machine-local; files a task needs (scripts, reports) are tracked.
+.satelle/tasks/*/output-exe_*.md
+.satelle/tasks/*/route.md
+.satelle/tasks/*/config-*.md
+.satelle/tasks/*/exe_*.md
 .satelle/backups/
 .satelle/**/*.bak
 .satelle/**/*.bak-*
