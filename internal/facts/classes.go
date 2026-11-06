@@ -66,6 +66,32 @@ var builtin = []struct {
 		"**/*.test.*", "**/*.spec.*", "**/__tests__/**", "**/__mocks__/**", "**/__snapshots__/**",
 		// .NET
 		"**/*Tests/**", "**/*Test/**", "**/*Tests.cs", "**/*Test.cs",
+		// Python
+		"**/test_*.py", "**/*_test.py", "**/conftest.py",
+		// Java and Kotlin; src/test/** comes from "**/test/**", and
+		// src/androidTest/** and src/integrationTest/** from "**/*Test/**"
+		"**/*Test.java", "**/*Tests.java", "**/*Test.kt", "**/*Tests.kt",
+		// Ruby
+		"**/spec/**", "**/*_spec.rb", "**/*_test.rb",
+		// PHP
+		"**/*Test.php",
+		// Swift; *Tests/** comes from the .NET "**/*Tests/**"
+		"**/*Tests.swift",
+		// C and C++
+		"**/*_test.c", "**/*_test.cc", "**/*_test.cpp", "**/*_unittest.cc", "**/*_unittest.cpp",
+		// Scala
+		"**/*Spec.scala", "**/*Suite.scala", "**/*Test.scala",
+		// Elixir
+		"**/*_test.exs",
+		// Dart
+		"**/*_test.dart",
+		// Terraform
+		"**/*.tftest.hcl", "**/*.tftest.json",
+		// Shell
+		"**/*.bats",
+		// Rust needs no pattern of its own: its integration tests are tests/**,
+		// which "**/tests/**" covers, and its unit tests sit inside source files
+		// (#[cfg(test)]), which a path cannot show.
 		// any ecosystem
 		"**/test/**", "**/tests/**",
 	}},

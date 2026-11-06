@@ -1,8 +1,10 @@
 package facts
 
 import (
+	"os"
 	"reflect"
 	"regexp"
+	"strings"
 	"testing"
 )
 
@@ -57,6 +59,20 @@ func TestClassify(t *testing.T) {
 		{"cmd/latest/main.go", nil},
 		{"amd/x.go", nil},
 		{"src/Contest.cs", nil},
+		{"flow/steps.py", nil},
+		{"lib/contest.py", nil},
+		{"src/main/java/com/x/App.java", nil},
+		{"src/main/java/com/x/Contest.java", nil},
+		{"lib/app.rb", nil},
+		{"src/lib.rs", nil},
+		{"src/Contest.php", nil},
+		{"Sources/App/App.swift", nil},
+		{"src/net/socket.cc", nil},
+		{"src/App.scala", nil},
+		{"lib/app.ex", nil},
+		{"lib/main.dart", nil},
+		{"main.tf", nil},
+		{"scripts/run.sh", nil},
 		{"", nil},
 	}
 	for _, tt := range tests {
@@ -95,6 +111,52 @@ func TestClassifyConventions(t *testing.T) {
 		{"src/App/Migrations/AppModelSnapshot.cs", gen},
 		{"src/App.Tests/ServiceTests.cs", test},
 		{"src/App.UnitTests/Foo.cs", test},
+		// Python
+		{"flow/test_steps.py", test},
+		{"pkg/steps_test.py", test},
+		{"conftest.py", test},
+		{"tests/unit/conftest.py", test},
+		// Java and Kotlin
+		{"src/test/java/com/x/AppTest.java", test},
+		{"app/src/main/java/com/x/AppTests.java", test},
+		{"src/androidTest/kotlin/x/UiTest.kt", test},
+		{"lib/src/jvmMain/x/CacheTests.kt", test},
+		// Ruby
+		{"spec/models/user_spec.rb", test},
+		{"spec/support/helpers.rb", test},
+		{"lib/user_spec.rb", test},
+		{"test/models/user_test.rb", test},
+		// Rust
+		{"tests/integration.rs", test},
+		{"crates/core/tests/api.rs", test},
+		// PHP
+		{"src/UserTest.php", test},
+		{"tests/Unit/UserTest.php", test},
+		// Swift
+		{"Tests/AppTests/AppTests.swift", test},
+		{"AppTests/LoginTests.swift", test},
+		{"Sources/App/LoginTests.swift", test},
+		// C and C++
+		{"src/net/socket_test.cc", test},
+		{"base/strings_unittest.cc", test},
+		{"lib/parse_test.c", test},
+		{"lib/parse_test.cpp", test},
+		{"lib/parse_unittest.cpp", test},
+		// Scala
+		{"src/test/scala/x/AppSpec.scala", test},
+		{"core/src/main/scala/x/AppSuite.scala", test},
+		{"core/x/AppTest.scala", test},
+		// Elixir
+		{"test/my_app_test.exs", test},
+		{"apps/web/lib/web_test.exs", test},
+		// Dart
+		{"test/widget_test.dart", test},
+		{"lib/src/parser_test.dart", test},
+		// Terraform
+		{"modules/vpc/main.tftest.hcl", test},
+		{"vpc.tftest.json", test},
+		// Shell
+		{"scripts/deploy.bats", test},
 		// docs, any ecosystem
 		{"docs/setup.txt", docs},
 		{"LICENSE", docs},
@@ -134,5 +196,24 @@ func TestBuiltinOrder(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("builtin classes = %v, want %v", got, want)
+	}
+}
+
+// TestReadmeListsTestCatalog pins that the README's test-file catalog names
+// every built-in test pattern as a code span, so the two cannot drift apart.
+func TestReadmeListsTestCatalog(t *testing.T) {
+	readme, err := os.ReadFile("../../README.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, b := range builtin {
+		if b.class != ClassTest {
+			continue
+		}
+		for _, p := range b.patterns {
+			if !strings.Contains(string(readme), "`"+p+"`") {
+				t.Errorf("README does not list test pattern `%s`", p)
+			}
+		}
 	}
 }

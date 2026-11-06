@@ -11,7 +11,7 @@ import (
 )
 
 // TestCollectClassifiesChangedPaths drives collection against a fixture
-// repository whose branch touches Go, JavaScript and .NET files of every
+// repository whose branch touches Go, JavaScript, .NET and Python files of every
 // class, and checks each changed file's classes in the facts JSON: one or more
 // classes in a fixed order, or no "classes" key at all.
 func TestCollectClassifiesChangedPaths(t *testing.T) {
@@ -39,6 +39,9 @@ func TestCollectClassifiesChangedPaths(t *testing.T) {
 		"svc/Form1.Designer.cs":     {"generated"},
 		"svc/packages.lock.json":    {"lock"},
 		"svc.Tests/ProgramTests.cs": {"test"},
+		// Python
+		"flow/test_steps.py": {"test"},
+		"flow/steps.py":      nil,
 		// docs
 		"README.md":      {"docs"},
 		"docs/setup.txt": {"docs"},

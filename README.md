@@ -62,6 +62,36 @@ Where a change lands (auth, migrations, infrastructure, secrets) is shown on the
 report as context for reviewers, but does not count towards the score: it is the
 area's risk, not the developer's.
 
+### Test files
+
+The tests measure classes a file as a test from its path alone, by the built-in
+catalog below. The catalog is versioned with each release and owned by
+`internal/facts/classes.go`. Patterns are case-sensitive globs over the
+repo-relative path, and `**/` matches any directories.
+
+| Language | Test paths |
+| --- | --- |
+| Go | `**/*_test.go`, `**/testdata/**` |
+| JavaScript/TypeScript | `**/*.test.*`, `**/*.spec.*`, `**/__tests__/**`, `**/__mocks__/**`, `**/__snapshots__/**` |
+| .NET | `**/*Tests/**`, `**/*Test/**`, `**/*Tests.cs`, `**/*Test.cs` |
+| Python | `**/test_*.py`, `**/*_test.py`, `**/conftest.py` |
+| Java/Kotlin | `**/*Test.java`, `**/*Tests.java`, `**/*Test.kt`, `**/*Tests.kt`; `src/test/**` by `**/test/**`, `src/androidTest/**` and `src/integrationTest/**` by `**/*Test/**` |
+| Ruby | `**/spec/**`, `**/*_spec.rb`, `**/*_test.rb`; `test/**` by `**/test/**` |
+| Rust | `tests/**` by `**/tests/**` |
+| PHP | `**/*Test.php` |
+| Swift | `**/*Tests.swift`; `*Tests/**` by `**/*Tests/**` |
+| C/C++ | `**/*_test.c`, `**/*_test.cc`, `**/*_test.cpp`, `**/*_unittest.cc`, `**/*_unittest.cpp` |
+| Scala | `**/*Spec.scala`, `**/*Suite.scala`, `**/*Test.scala` |
+| Elixir | `**/*_test.exs` |
+| Dart | `**/*_test.dart` |
+| Terraform | `**/*.tftest.hcl`, `**/*.tftest.json` |
+| Shell | `**/*.bats` |
+| Any ecosystem | `**/test/**`, `**/tests/**` |
+
+- In-file unit tests (Rust `#[cfg(test)]`, Python doctests) cannot be seen from
+  a path.
+- Any directory named `spec/` or `test/` is classed test whatever the language.
+
 ## Estimate, then score
 
 The same scorer runs over two sources of facts:
