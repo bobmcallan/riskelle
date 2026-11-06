@@ -56,10 +56,12 @@ type Result struct {
 }
 
 // Consequence is one consequence class the change carries, with the floor
-// the rules give it.
+// the rules give it and, when a production root raised that floor, the roots
+// its paths lie under.
 type Consequence struct {
 	facts.Consequence
-	Floor Level `json:"floor"`
+	Floor           Level    `json:"floor"`
+	ProductionRoots []string `json:"production_roots,omitempty"` // in rules order; nil when no root raised the floor
 }
 
 // Area is one sensitive area a change lands in and the changed paths that
@@ -117,7 +119,8 @@ func Score(f facts.Facts, r Rules) Result {
 // consequences gives each consequence in the facts, in their order, its floor
 // from the rules, copying its lists so the result aliases nothing. A class
 // with no floor gets the lowest level, so it is reported and raises nothing.
-// Nil when the facts carry none.
+// A consequence with any path under a production root is floored at the
+// highest level instead, naming those roots. Nil when the facts carry none.
 func consequences(f facts.Facts, r Rules) []Consequence {
 	if len(f.Consequences) == 0 {
 		return nil
@@ -125,6 +128,10 @@ func consequences(f facts.Facts, r Rules) []Consequence {
 	lowest := Level("")
 	if len(r.Levels) > 0 {
 		lowest = r.Levels[0].Level
+	}
+	roots := make([]facts.Globs, len(r.ProductionRoots))
+	for i, root := range r.ProductionRoots {
+		roots[i] = facts.CompileGlobs([]string{root})
 	}
 	out := make([]Consequence, 0, len(f.Consequences))
 	for _, c := range f.Consequences {
@@ -134,13 +141,26 @@ func consequences(f facts.Facts, r Rules) []Consequence {
 				floor = fl.Level
 			}
 		}
+		var in []string
+		for i, g := range roots {
+			for _, p := range c.Paths {
+				if g.Match(p) {
+					in = append(in, r.ProductionRoots[i])
+					break
+				}
+			}
+		}
+		if len(in) > 0 && len(r.Levels) > 0 {
+			floor = r.Levels[len(r.Levels)-1].Level
+		}
 		out = append(out, Consequence{
 			Consequence: facts.Consequence{
 				Class: c.Class,
 				Paths: append([]string{}, c.Paths...),
 				Types: append([]string{}, c.Types...),
 			},
-			Floor: floor,
+			Floor:           floor,
+			ProductionRoots: in,
 		})
 	}
 	return out

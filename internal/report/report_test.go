@@ -205,3 +205,21 @@ func TestReadmeDocumentsReportConsequences(t *testing.T) {
 		}
 	}
 }
+
+// TestReportNamesProductionRoot pins that a floor raised by a production root
+// names the root in JSON and Markdown, and that a plain floor names none.
+func TestReportNamesProductionRoot(t *testing.T) {
+	r := estimateFixture()
+	r.Consequences[0].Floor = score.High
+	r.Consequences[0].ProductionRoots = []string{"iam/**"}
+	if md := string(render(t, "markdown", r)); !strings.Contains(md,
+		"- identity_rights, floor High (production root `iam/**`): paths `iam/roles.tf`; types none (planned)") {
+		t.Errorf("markdown does not name the root:\n%s", md)
+	}
+	if js := string(render(t, "json", r)); !strings.Contains(js, `"production_roots": [`) {
+		t.Errorf("json does not name the root:\n%s", js)
+	}
+	if js := string(render(t, "json", estimateFixture())); strings.Contains(js, "production_roots") {
+		t.Errorf("json names roots with none:\n%s", js)
+	}
+}

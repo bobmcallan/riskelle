@@ -62,6 +62,11 @@ type Rules struct {
 	// and always hashed; .risk/rules.json may not set them.
 	ConsequenceFloors []Floor `json:"consequence_floors"`
 
+	// Repo-named production roots (.risk/rules.json): directory globs. A
+	// consequence with a path under one is floored at the highest level.
+	// Omitted when empty, so the built-in rules hash as before.
+	ProductionRoots []string `json:"production_roots,omitempty"`
+
 	// Repo-added sensitive areas (.risk/rules.json): globs by area name,
 	// beside the built-in areas in facts. Report context only, never scored;
 	// omitted when empty, so the built-in rules hash as before.

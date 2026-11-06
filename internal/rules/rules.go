@@ -44,6 +44,11 @@ type File struct {
 	// only add risk. Any other value is refused by name (see Parse).
 	ExcludeNonCodeFiles *bool `json:"exclude_non_code_files"` // the non_code catalog
 	ExcludeLogFiles     *bool `json:"exclude_log_files"`      // the run_record catalog
+
+	// Production roots: directory globs ending in /**. A consequence whose
+	// triggering path lies under one is floored at the highest level, so a
+	// root can only raise a floor.
+	ProductionRoots []string `json:"production_roots"`
 }
 
 // toggle is one exclusion toggle: its key, the class it governs and its value
@@ -112,6 +117,14 @@ func Parse(data []byte) (File, error) {
 	}
 	if err := checkPatterns("generated", f.Generated); err != nil {
 		return File{}, err
+	}
+	if err := checkPatterns("production_roots", f.ProductionRoots); err != nil {
+		return File{}, err
+	}
+	for i, p := range f.ProductionRoots {
+		if !strings.HasSuffix(p, "/**") || p == "/**" {
+			return File{}, fmt.Errorf("production_roots[%d] %q: a production root names a directory and ends in /**", i, p)
+		}
 	}
 	for _, name := range slices.Sorted(maps.Keys(f.Areas)) {
 		if !areaName.MatchString(name) {
@@ -189,7 +202,8 @@ func checkToggles(data []byte) error {
 }
 
 // Apply returns r with the file's additions merged in: Generated becomes the
-// sorted, de-duplicated union of both, nil when empty, and so does each area's
+// sorted, de-duplicated union of both, nil when empty, as does
+// ProductionRoots, and so does each area's
 // patterns in Areas, a fresh map nil when empty. Each exclusion toggle that
 // is absent or true adds its class to SizeExcludes once; one set to false
 // removes it, so its files count. r is not changed.
@@ -204,6 +218,7 @@ func Apply(r score.Rules, f File) score.Rules {
 	}
 	r.SizeExcludes = ex
 	r.Generated = union(r.Generated, f.Generated)
+	r.ProductionRoots = union(r.ProductionRoots, f.ProductionRoots)
 	var areas map[string][]string
 	for _, m := range []map[string][]string{r.Areas, f.Areas} {
 		for name, ps := range m {

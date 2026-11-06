@@ -672,3 +672,58 @@ func TestReadmeDocumentsFloors(t *testing.T) {
 		t.Error("README Rules lacks `consequence_floors`")
 	}
 }
+
+// rootRules are the built-in rules with one production root.
+func rootRules() Rules {
+	r := Default()
+	r.ProductionRoots = []string{"prod-tenant/**"}
+	return r
+}
+
+func TestProductionRootRaisesFloor(t *testing.T) {
+	with := func(paths ...string) facts.Facts {
+		f := levelFacts(0, 2, 0, 0)
+		f.Consequences = []facts.Consequence{{Class: facts.ConsequenceIdentityRights, Paths: paths, Types: []string{"azurerm_role_assignment"}}}
+		return f
+	}
+	tests := []struct {
+		name      string
+		f         facts.Facts
+		r         Rules
+		wantLevel Level
+		wantRoots []string
+	}{
+		{"under the root", with("prod-tenant/main.tf"), rootRules(), High, []string{"prod-tenant/**"}},
+		{"outside every root", with("other/main.tf"), rootRules(), Medium, nil},
+		{"one path of two under the root (a rename's old path)", with("moved/main.tf", "prod-tenant/main.tf"), rootRules(), High, []string{"prod-tenant/**"}},
+		{"under two roots, in rules order", with("a/x.tf", "b/x.tf"), func() Rules { r := Default(); r.ProductionRoots = []string{"a/**", "b/**"}; return r }(), High, []string{"a/**", "b/**"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := Score(tt.f, tt.r)
+			plain := Score(tt.f, Default())
+			if got.Level != tt.wantLevel || !reflect.DeepEqual(got.Consequences[0].ProductionRoots, tt.wantRoots) {
+				t.Errorf("level %s roots %v, want %s %v", got.Level, got.Consequences[0].ProductionRoots, tt.wantLevel, tt.wantRoots)
+			}
+			if got.Consequences[0].Floor != tt.wantLevel {
+				t.Errorf("floor %s, want %s", got.Consequences[0].Floor, tt.wantLevel)
+			}
+			if got.Total != plain.Total || !reflect.DeepEqual(got.Breakdown, plain.Breakdown) {
+				t.Error("a production root changed the total or breakdown")
+			}
+		})
+	}
+	r := rootRules()
+	r.Levels = nil
+	Score(with("prod-tenant/main.tf"), r) // no levels: must not panic
+}
+
+func TestProductionRootsWithoutConsequence(t *testing.T) {
+	inRoot := levelFacts(201, 6, 3, 2)
+	inRoot.Files = append(inRoot.Files, facts.File{Path: "prod-tenant/main.tf", Added: 5})
+	for _, f := range []facts.Facts{mixed(), levelFacts(401, 2, 0, 0), inRoot} {
+		if got, want := Score(f, rootRules()), Score(f, Default()); !reflect.DeepEqual(got, want) {
+			t.Errorf("roots with no consequence changed the result:\n%+v\nwant\n%+v", got, want)
+		}
+	}
+}

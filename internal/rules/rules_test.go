@@ -2,8 +2,10 @@ package rules
 
 import (
 	"encoding/json"
+	"os"
 	"reflect"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -38,6 +40,13 @@ func TestParse(t *testing.T) {
 		{`{"areas":{"pay":[]}}`, File{}, "areas.pay: no patterns"},
 		{`{"areas":{"pay":["ok/**",""]}}`, File{}, "areas.pay[1]: empty pattern"},
 		{`{"areas":{"pay":["/x"]}}`, File{}, `areas.pay[0] "/x": patterns are repo-relative`},
+		{`{"production_roots":["prod-tenant/**"]}`, File{ProductionRoots: []string{"prod-tenant/**"}}, ""},
+		{`{"production_roots":[]}`, File{ProductionRoots: []string{}}, ""},
+		{`{"production_roots":["a/**",""]}`, File{}, "production_roots[1]: empty pattern"},
+		{`{"production_roots":["/sub/**"]}`, File{}, `production_roots[0] "/sub/**": patterns are repo-relative`},
+		{`{"production_roots":["prod-tenant"]}`, File{}, `production_roots[0] "prod-tenant": a production root names a directory and ends in /**`},
+		{`{"production_roots":["prod-tenant/"]}`, File{}, `production_roots[0] "prod-tenant/": a production root names a directory`},
+		{`{"production_roots":"prod-tenant/**"}`, File{}, "production_roots"},
 		{`{"areas":["x"]}`, File{}, "cannot unmarshal"},
 		{`{"exclude_log_files":false}`, File{ExcludeLogFiles: ptr(false)}, ""},
 		{`{"exclude_log_files":true,"exclude_non_code_files":false}`,
@@ -213,5 +222,78 @@ func TestHashRecordsFloors(t *testing.T) {
 	}
 	if Hash(score.Default()) != Hash(score.Default()) {
 		t.Error("the built-in rules hash is not stable")
+	}
+}
+
+// TestApplyProductionRoots pins that roots merge as a sorted, de-duplicated
+// union, nil when empty, without changing the input.
+func TestApplyProductionRoots(t *testing.T) {
+	base := score.Default()
+	base.ProductionRoots = []string{"b/**", "a/**"}
+	got := Apply(base, File{ProductionRoots: []string{"c/**", "a/**"}})
+	if want := []string{"a/**", "b/**", "c/**"}; !slices.Equal(got.ProductionRoots, want) {
+		t.Errorf("roots = %v, want %v", got.ProductionRoots, want)
+	}
+	if !slices.Equal(base.ProductionRoots, []string{"b/**", "a/**"}) {
+		t.Errorf("input changed: %v", base.ProductionRoots)
+	}
+	if got := Apply(score.Default(), File{ProductionRoots: []string{}}); got.ProductionRoots != nil {
+		t.Errorf("empty roots = %#v, want nil", got.ProductionRoots)
+	}
+}
+
+// TestHashRecordsProductionRoots pins that roots are hashed, in any order the
+// same, and that without roots the built-in hash is unchanged.
+func TestHashRecordsProductionRoots(t *testing.T) {
+	one := Apply(score.Default(), File{ProductionRoots: []string{"a/**", "b/**"}})
+	two := Apply(score.Default(), File{ProductionRoots: []string{"b/**", "a/**"}})
+	if Hash(one) != Hash(two) {
+		t.Error("roots in another order hash differently")
+	}
+	if Hash(one) == Hash(score.Default()) {
+		t.Error("roots do not change the hash")
+	}
+	for _, r := range []score.Rules{score.Default(), Apply(score.Default(), File{})} {
+		if b, _ := json.Marshal(r); strings.Contains(string(b), "production_roots") {
+			t.Errorf("rules without roots marshal a production_roots key: %s", b)
+		}
+	}
+}
+
+// TestReadmeDocumentsProductionRoots pins the README's production roots
+// wording in Rules, Consequences and Report.
+func TestReadmeDocumentsProductionRoots(t *testing.T) {
+	data, err := os.ReadFile("../../README.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	section := func(heading string) string {
+		s := string(data)
+		i := strings.Index(s, "\n"+heading+"\n")
+		if i < 0 {
+			t.Fatalf("README has no %q section", heading)
+		}
+		s = s[i+len(heading)+2:]
+		depth := strings.Index(heading, " ")
+		for j := 0; j < len(s); j++ {
+			if (j == 0 || s[j-1] == '\n') && strings.HasPrefix(s[j:], "#") {
+				if len(s[j:])-len(strings.TrimLeft(s[j:], "#")) <= depth {
+					return s[:j]
+				}
+			}
+		}
+		return s
+	}
+	for heading, wants := range map[string][]string{
+		"## Rules":         {"`production_roots`", "/**"},
+		"### Consequences": {"`production_roots`", "High"},
+		"### Report":       {`"production_roots"`},
+	} {
+		sec := section(heading)
+		for _, w := range wants {
+			if !strings.Contains(sec, w) {
+				t.Errorf("README %s lacks %s", heading, w)
+			}
+		}
 	}
 }

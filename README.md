@@ -83,7 +83,17 @@ own level and every consequence's floor. A floor never changes the total or any
 breakdown entry, so the shape score still rewards small changes, and splitting a
 change cannot lower a floor: the class lands in whichever change carries it.
 The floors are built in (`consequence_floors`), recorded in the rules hash on
-every report, and refused by name if `.risk/rules.json` sets them.
+every report, and refused by name if `.risk/rules.json` sets them: a repo can
+only raise a floor, through production roots.
+
+**Production roots.** `.risk/rules.json` may name `production_roots`: globs for
+directories, each ending in `/**` (such as a production tenant's Terraform
+root). A consequence whose triggering path lies under one (at head, at the
+merge base for a rename or deletion, or a planned path) is floored at High, the
+top of the scale, instead of its class's floor; the consequence names the
+roots. The total is unchanged. Roots are read from the target branch like every
+rule, recorded in the rules hash, and change nothing for a change with no
+consequence in them.
 
 | Class | Floor | Terraform types (globs) |
 | --- | --- | --- |
@@ -272,7 +282,9 @@ under `"context"` (JSON) or "Where it lands (context, not scored)" (Markdown),
 labelled as context that does not count towards the score. The consequences the
 change carries sit under `"consequences"` (class, paths, types and floor; `[]`
 when none) and, in Markdown, under "Consequences (floor the level)", shown only
-when there is one. The same result always prints the same bytes.
+when there is one. A consequence floored by a production root carries
+`"production_roots"`, and its Markdown line reads `floor High (production root
+…)`. The same result always prints the same bytes.
 
 ## With satelle
 
@@ -346,13 +358,19 @@ line it leaves for reviewers, is in the skill file itself.
   everywhere.
 - **`.risk/rules.json` in the assessed repo:** settings that can only *add*
   risk or context (extra generated paths for the report, extra sensitive
-  areas, and the exclusion toggles `exclude_non_code_files` and
-  `exclude_log_files`). It is read from the **target branch**, so a change cannot alter its
+  areas, the exclusion toggles `exclude_non_code_files` and
+  `exclude_log_files`, and `production_roots`). It is read from the **target branch**, so a change cannot alter its
   own rules. Anything that would lower a score is refused by name. A change
   that edits `.risk/` is scored like any other change: riskelle does not try
   to guard against a dishonest developer. riskelle's own
   [`.risk/rules.json`](.risk/rules.json) is an example: it adds areas for the
   scorer and the release pipelines, and marks the report goldens generated.
+
+Production roots in `.risk/rules.json`, such as
+`{"production_roots": ["prod-tenant/**"]}`, raise the floor of a consequence
+under them to High (see [Consequences](#consequences)). A root that is empty,
+absolute or does not end in `/**` is refused by name; roots with no consequence
+in them change nothing.
 
 The exclusion toggles in `.risk/rules.json`:
 

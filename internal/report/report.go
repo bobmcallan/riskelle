@@ -126,7 +126,15 @@ func (r Report) Markdown(w io.Writer) error {
 			if len(c.Types) > 0 {
 				types = codes(c.Types)
 			}
-			fmt.Fprintf(&b, "- %s, floor %s: paths %s; types %s\n", c.Class, c.Floor, codes(c.Paths), types)
+			floor := string(c.Floor)
+			switch len(c.ProductionRoots) {
+			case 0:
+			case 1:
+				floor += " (production root " + code(c.ProductionRoots[0]) + ")"
+			default:
+				floor += " (production roots " + codes(c.ProductionRoots) + ")"
+			}
+			fmt.Fprintf(&b, "- %s, floor %s: paths %s; types %s\n", c.Class, floor, codes(c.Paths), types)
 		}
 		b.WriteString("\n")
 	}
