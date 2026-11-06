@@ -27,3 +27,28 @@ func ReadFileAt(ctx context.Context, repo, commit, p string) (data []byte, found
 	data, err = git(ctx, repo, "cat-file", "blob", fields[2])
 	return data, err == nil, err
 }
+
+// treeBlobs lists the regular-file blobs (modes 100644 and 100755) in the
+// tree of commit; symlinks and gitlinks are not files and are left out.
+func treeBlobs(ctx context.Context, repo, commit string) ([]blob, error) {
+	out, err := git(ctx, repo, "ls-tree", "-r", "-z", "--full-tree", commit)
+	if err != nil {
+		return nil, err
+	}
+	var blobs []blob
+	for _, rec := range strings.Split(string(out), "\x00") {
+		if rec == "" {
+			continue
+		}
+		meta, p, ok := strings.Cut(rec, "\t")
+		fields := strings.Fields(meta)
+		if !ok || len(fields) != 3 {
+			return nil, fmt.Errorf("facts: malformed ls-tree record %q", rec)
+		}
+		if fields[1] != "blob" || (fields[0] != "100644" && fields[0] != "100755") {
+			continue
+		}
+		blobs = append(blobs, blob{path: p, sha: fields[2]})
+	}
+	return blobs, nil
+}

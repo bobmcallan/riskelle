@@ -29,24 +29,13 @@ func CollectImpact(ctx context.Context, repo, commit string, paths []string) (Im
 	if len(paths) == 0 {
 		return emptyImpact(), nil
 	}
-	out, err := git(ctx, repo, "ls-tree", "-r", "-z", "--full-tree", commit)
+	blobs, err := treeBlobs(ctx, repo, commit)
 	if err != nil {
 		return Impact{}, err
 	}
 	var mods, gos, others []blob
-	for _, rec := range strings.Split(string(out), "\x00") {
-		if rec == "" {
-			continue
-		}
-		meta, p, ok := strings.Cut(rec, "\t")
-		fields := strings.Fields(meta)
-		if !ok || len(fields) != 3 {
-			return Impact{}, fmt.Errorf("facts: malformed ls-tree record %q", rec)
-		}
-		if fields[1] != "blob" || (fields[0] != "100644" && fields[0] != "100755") {
-			continue // symlinks and gitlinks are not files
-		}
-		b := blob{path: p, sha: fields[2]}
+	for _, b := range blobs {
+		p := b.path
 		switch {
 		case path.Base(p) == "go.mod":
 			mods = append(mods, b)

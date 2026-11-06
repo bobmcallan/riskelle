@@ -52,6 +52,10 @@ func Collect(ctx context.Context, repo, base, head string) (Facts, error) {
 	for i := range files {
 		files[i].Classes = Classify(files[i].Path)
 	}
+	// A file whose head blob carries a generated marker is generated too.
+	if err := markGeneratedHeads(ctx, repo, headSHA, files); err != nil {
+		return Facts{}, err
+	}
 
 	roots := map[string]bool{}
 	atBase := map[string]bool{}
