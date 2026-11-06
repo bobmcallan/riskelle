@@ -43,6 +43,10 @@ func TestReadPlan(t *testing.T) {
 		{"negative added", `{"target":"main","files":[{"path":"a","added":-1}]}`, []string{`files[0] "a": "added" is negative`}},
 		{"negative removed", `{"target":"main","files":[{"path":"a","removed":-1}]}`, []string{`files[0] "a": "removed" is negative`}},
 		{"two problems", `{"files":[{"path":"a"}]}`, []string{`missing "target"`, `files[0] "a": missing "added" or "removed"`}},
+		{"unknown consequence", `{"target":"main","files":[{"path":"a.tf","added":1,"consequences":["root_access"]}]}`, []string{`files[0] "a.tf": unknown consequence "root_access"`}},
+		{"duplicate consequence", `{"target":"main","files":[{"path":"a.tf","added":1,"consequences":["identity_rights","identity_rights"]}]}`, []string{`files[0] "a.tf": duplicate consequence "identity_rights"`}},
+		{"consequence problems on two paths", `{"target":"main","files":[{"path":"a.tf","added":1,"consequences":["x"]},{"path":"b.tf","added":1,"consequences":["identity_rights","identity_rights"]}]}`,
+			[]string{`files[0] "a.tf": unknown consequence "x"`, `files[1] "b.tf": duplicate consequence "identity_rights"`}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -114,5 +118,35 @@ func TestPredict(t *testing.T) {
 
 	if _, err := Predict(ctx, f.dir, Plan{Target: "nope", Files: plan.Files}); err == nil || !strings.Contains(err.Error(), `"nope"`) {
 		t.Errorf("Predict(target nope) error = %v, want it to name \"nope\"", err)
+	}
+}
+
+func TestReadPlanConsequences(t *testing.T) {
+	got, err := ReadPlan(strings.NewReader(`{"target":"main","files":[{"path":"iam/roles.tf","added":4,"consequences":["identity_rights"]}]}`))
+	if err != nil {
+		t.Fatalf("ReadPlan: %v", err)
+	}
+	if want := []string{ConsequenceIdentityRights}; !reflect.DeepEqual(got.Files[0].Consequences, want) {
+		t.Errorf("Consequences = %v, want %v", got.Files[0].Consequences, want)
+	}
+}
+
+func TestPredictConsequences(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	got, err := Predict(ctx, f.dir, Plan{Target: "main", Files: []PlannedFile{
+		{Path: "iam/roles.tf", Added: 4, Consequences: []string{ConsequenceIdentityRights}},
+		{Path: "app/main.go", Added: 1},
+	}})
+	if err != nil {
+		t.Fatalf("Predict: %v", err)
+	}
+	want := []Consequence{{Class: ConsequenceIdentityRights, Paths: []string{"iam/roles.tf"}, Types: []string{}}}
+	if !reflect.DeepEqual(got.Consequences, want) {
+		t.Errorf("Consequences = %+v, want %+v", got.Consequences, want)
+	}
+	got, err = Predict(ctx, f.dir, Plan{Target: "main", Files: []PlannedFile{{Path: "iam/roles.tf", Added: 4}}})
+	if err != nil || got.Consequences != nil {
+		t.Errorf("Predict(no consequence) = %+v, %v; want none", got.Consequences, err)
 	}
 }

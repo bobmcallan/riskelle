@@ -32,6 +32,10 @@ type Facts struct {
 	Degree      Degree   `json:"degree"` // lines in files that existed at the merge base against lines in new files
 	Impact      Impact   `json:"impact"`
 
+	// The consequence classes the change carries, sorted by class; nil (and
+	// absent from the JSON) when none.
+	Consequences []Consequence `json:"consequences,omitempty"`
+
 	// The unpaired languages (Shell, Terraform) with a test file in the head
 	// tree, sorted; the tests measure counts their files only when present.
 	TestLanguages []string `json:"test_languages"`

@@ -37,10 +37,8 @@ func Collect(ctx context.Context, repo, base, head string) (Facts, error) {
 	// Every setting that changes the diff is pinned by flag, so user or repo
 	// config cannot change the facts; attributes come from the head commit,
 	// not the working tree.
-	out, err := git(ctx, repo, "--attr-source="+headSHA, "diff", "--numstat", "-z",
-		"--no-color", "--no-ext-diff", "--no-textconv", "--no-relative",
-		"--ignore-submodules=none", "--diff-algorithm=myers", "-M50%", "-l1000",
-		mergeBase, headSHA)
+	out, err := git(ctx, repo, append(append([]string{"--attr-source=" + headSHA, "diff", "--numstat", "-z"},
+		pinnedDiff...), mergeBase, headSHA)...)
 	if err != nil {
 		return Facts{}, err
 	}
@@ -54,6 +52,10 @@ func Collect(ctx context.Context, repo, base, head string) (Facts, error) {
 	}
 	// A file whose head blob carries a generated marker is generated too.
 	if err := markGeneratedHeads(ctx, repo, headSHA, files); err != nil {
+		return Facts{}, err
+	}
+	consequences, err := collectConsequences(ctx, repo, mergeBase, headSHA, files)
+	if err != nil {
 		return Facts{}, err
 	}
 
@@ -103,10 +105,18 @@ func Collect(ctx context.Context, repo, base, head string) (Facts, error) {
 		Degree:      DegreeOf(files),
 		Impact:      impact,
 
+		Consequences:  consequences,
 		TestLanguages: testLangs,
 		BranchAgeDays: age,
 		TrunkCommits:  drift,
 	}, nil
+}
+
+// pinnedDiff is every git diff flag that changes what a diff reports, pinned
+// so user or repo config cannot change the facts.
+var pinnedDiff = []string{
+	"--no-color", "--no-ext-diff", "--no-textconv", "--no-relative",
+	"--ignore-submodules=none", "--diff-algorithm=myers", "-M50%", "-l1000",
 }
 
 // resolve turns a ref into the full SHA of the commit it names.

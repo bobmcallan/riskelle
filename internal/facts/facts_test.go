@@ -1,7 +1,9 @@
 package facts
 
 import (
+	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -91,5 +93,19 @@ func TestParseNumstat(t *testing.T) {
 		if _, err := parseNumstat([]byte(bad)); err == nil {
 			t.Errorf("parseNumstat(%q) = nil error, want an error", bad)
 		}
+	}
+}
+
+func TestFactsConsequencesJSON(t *testing.T) {
+	b, err := json.Marshal(Facts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b), `"consequences"`) {
+		t.Errorf("facts with no consequence = %s, want no consequences key", b)
+	}
+	b, _ = json.Marshal(Facts{Consequences: []Consequence{{Class: ConsequenceIdentityRights, Paths: []string{"a.tf"}, Types: []string{"aws_iam_role"}}}})
+	if want := `"consequences":[{"class":"identity_rights","paths":["a.tf"],"types":["aws_iam_role"]}]`; !strings.Contains(string(b), want) {
+		t.Errorf("facts = %s, want it to contain %s", b, want)
 	}
 }

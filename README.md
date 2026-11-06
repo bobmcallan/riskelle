@@ -69,6 +69,30 @@ Where a change lands (auth, migrations, infrastructure, secrets) is shown on the
 report as context for reviewers, but does not count towards the score: it is the
 area's risk, not the developer's.
 
+### Consequences
+
+A consequence is what a change *does*, read from its changed lines, not where
+it lands. riskelle finds each consequence class in a built-in, versioned
+catalog, mechanically and the same way every time, and records it in the facts
+as `"consequences"`: the class, the paths that triggered it and the block types
+that did. The facts record the class only; a later release makes each class set
+a floor on the reported level.
+
+| Class | Terraform types (globs) |
+| --- | --- |
+| `identity_rights` | `aws_iam_*`, `azuread_app_role_assignment`, `azuread_application*`, `azuread_directory_role*`, `azuread_service_principal*`, `azurerm_federated_identity_credential`, `azurerm_role_assignment`, `azurerm_role_definition`, `azurerm_user_assigned_identity`, `google_*_iam_*` |
+
+- Only `.tf` files are read, and in them only `resource` and `data` blocks of a
+  catalogued type. A mention of a type in any other file never counts.
+- A block carries its class when any line in it is added, removed or altered:
+  added lines are read at head, removed ones at the merge base. A rename is
+  checked at both paths.
+- Blocks are found by their header at column 0, as `terraform fmt` writes every
+  file; a heredoc body (such as a JSON policy) belongs to its block wherever it
+  starts. A file that is not formatted may be misread.
+- A plan has no content, so a planned path names its classes instead (see
+  [Plan file](#plan-file)).
+
 ### Test files
 
 The tests measure classes a file as a test from its path alone, by the built-in
@@ -201,6 +225,10 @@ a JSON plan file that predicts the change:
     added lines.
 - `branch_age_days` (optional, default 0, non-negative): the expected days
   from the branch's first commit to merge.
+- `consequences` (optional, per file): the consequence classes the path is
+  expected to carry, such as `{"path": "iam/roles.tf", "added": 20,
+  "consequences": ["identity_rights"]}`; see [Consequences](#consequences). An
+  unknown class, or one listed twice for a path, is refused by name.
 - Which languages have tests (see [Files with no pairing](#files-with-no-pairing))
   is read from the target's tree plus the planned paths; the plan file has no
   field for it.

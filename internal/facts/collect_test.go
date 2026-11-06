@@ -2,6 +2,7 @@ package facts
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -337,4 +338,78 @@ func TestCollectTestLanguages(t *testing.T) {
 	if want := []string{"Terraform"}; !reflect.DeepEqual(got.TestLanguages, want) {
 		t.Errorf("TestLanguages = %v, want %v", got.TestLanguages, want)
 	}
+}
+
+// TestCollectConsequences collects identity_rights from a real diff: a
+// catalogued block altered, one added as a data block and one removed, and
+// nothing from an uncatalogued block or a mention in another file.
+func TestCollectConsequences(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	const storage = "resource \"azurerm_storage_account\" \"s\" {\n  name = \"one\"\n}\n"
+	const role = "resource \"azurerm_role_assignment\" \"r\" {\n  role = \"Reader\"\n}\n"
+	const iam = "resource \"aws_iam_role\" \"x\" {\n  name = \"x\"\n  assume_role_policy = <<EOF\n{\n  \"Version\": \"2012-10-17\"\n}\nEOF\n}\n"
+	fixture := func(t *testing.T) string {
+		dir := t.TempDir()
+		runGit(t, dir, "init", "--quiet", "--initial-branch=main")
+		write(t, dir, "iam/main.tf", storage+"\n"+role)
+		write(t, dir, "iam/old.tf", "locals {\n  a = 1\n}\n\n"+iam)
+		write(t, dir, "notes.md", "uses azurerm_role_assignment\n")
+		runGit(t, dir, "add", ".")
+		runGit(t, dir, "commit", "--quiet", "-m", "base")
+		runGit(t, dir, "switch", "--quiet", "-c", "feature")
+		return dir
+	}
+
+	t.Run("add, alter and remove", func(t *testing.T) {
+		dir := fixture(t)
+		write(t, dir, "iam/main.tf", storage+"\n"+strings.Replace(role, "Reader", "Owner", 1))
+		write(t, dir, "iam/sp.tf", "data \"azuread_service_principal\" \"x\" {\n  client_id = \"c\"\n}\n")
+		write(t, dir, "iam/old.tf", "locals {\n  a = 1\n}\n")
+		runGit(t, dir, "add", ".")
+		runGit(t, dir, "commit", "--quiet", "-m", "feature")
+		got, err := Collect(context.Background(), dir, "main", "feature")
+		if err != nil {
+			t.Fatalf("Collect: %v", err)
+		}
+		want := []Consequence{{
+			Class: ConsequenceIdentityRights,
+			Paths: []string{"iam/main.tf", "iam/old.tf", "iam/sp.tf"},
+			Types: []string{"aws_iam_role", "azuread_service_principal", "azurerm_role_assignment"},
+		}}
+		if !reflect.DeepEqual(got.Consequences, want) {
+			t.Errorf("Consequences = %+v, want %+v", got.Consequences, want)
+		}
+	})
+
+	t.Run("a policy line inside a heredoc", func(t *testing.T) {
+		dir := fixture(t)
+		write(t, dir, "iam/old.tf", "locals {\n  a = 1\n}\n\n"+strings.Replace(iam, "2012-10-17", "2024-01-01", 1))
+		runGit(t, dir, "commit", "--quiet", "-am", "feature")
+		got, err := Collect(context.Background(), dir, "main", "feature")
+		if err != nil {
+			t.Fatalf("Collect: %v", err)
+		}
+		if len(got.Consequences) != 1 || !reflect.DeepEqual(got.Consequences[0].Types, []string{"aws_iam_role"}) {
+			t.Errorf("Consequences = %+v, want aws_iam_role", got.Consequences)
+		}
+	})
+
+	t.Run("no catalogued type", func(t *testing.T) {
+		dir := fixture(t)
+		write(t, dir, "iam/main.tf", strings.Replace(storage, "one", "two", 1)+"\n"+role)
+		write(t, dir, "notes.md", "now uses azurerm_role_assignment twice\n")
+		runGit(t, dir, "commit", "--quiet", "-am", "feature")
+		got, err := Collect(context.Background(), dir, "main", "feature")
+		if err != nil {
+			t.Fatalf("Collect: %v", err)
+		}
+		if got.Consequences != nil {
+			t.Errorf("Consequences = %+v, want none", got.Consequences)
+		}
+		if b, _ := json.Marshal(got); strings.Contains(string(b), `"consequences"`) {
+			t.Errorf("facts JSON has a consequences key: %s", b)
+		}
+	})
 }

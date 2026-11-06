@@ -24,6 +24,7 @@ type Plan struct {
 type PlannedFile struct {
 	Path           string
 	Added, Removed int
+	Consequences   []string // consequence classes the path is expected to carry
 }
 
 // planJSON is the file's JSON; pointers tell an absent field from a zero one.
@@ -31,9 +32,10 @@ type planJSON struct {
 	Target        string `json:"target"`
 	BranchAgeDays int    `json:"branch_age_days"`
 	Files         *[]struct {
-		Path    string `json:"path"`
-		Added   *int   `json:"added"`
-		Removed *int   `json:"removed"`
+		Path         string   `json:"path"`
+		Added        *int     `json:"added"`
+		Removed      *int     `json:"removed"`
+		Consequences []string `json:"consequences"`
 	} `json:"files"`
 }
 
@@ -84,6 +86,18 @@ func ReadPlan(r io.Reader) (Plan, error) {
 			bad(`%s: missing "added" or "removed"`, at)
 		}
 		pf := PlannedFile{Path: f.Path, Added: derefOr(f.Added), Removed: derefOr(f.Removed)}
+		named := map[string]bool{}
+		for _, c := range f.Consequences {
+			switch {
+			case !IsConsequence(c):
+				bad("%s: unknown consequence %q", at, c)
+			case named[c]:
+				bad("%s: duplicate consequence %q", at, c)
+			default:
+				named[c] = true
+				pf.Consequences = append(pf.Consequences, c)
+			}
+		}
 		if pf.Added < 0 {
 			bad(`%s: "added" is negative`, at)
 		}
@@ -157,7 +171,7 @@ func Predict(ctx context.Context, repo string, p Plan) (Facts, error) {
 	return Facts{
 		Base: target, Files: files,
 		Directories: Directories(planned), Projects: Projects(planned, sorted(roots)),
-		Degree: DegreeOf(files), Impact: impact,
+		Degree: DegreeOf(files), Impact: impact, Consequences: plannedConsequences(p.Files),
 		TestLanguages: TestLanguages(slices.Concat(tree, planned)), BranchAgeDays: p.BranchAgeDays,
 	}, nil
 }
