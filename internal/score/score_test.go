@@ -514,3 +514,15 @@ func TestProvenanceJSON(t *testing.T) {
 		t.Errorf("Provenance JSON = %s, want %s", got, want)
 	}
 }
+
+// TestScoreReadsTestLanguages pins that Score hands the facts' test languages
+// to the tests measure: the same shell change counts only when the repo holds
+// a shell test.
+func TestScoreReadsTestLanguages(t *testing.T) {
+	files := []facts.File{{Path: "ops/run.sh", Added: 5}}
+	without := entry(t, Score(facts.Facts{Files: files}, Default()), "tests", "untested_production_files")
+	with := entry(t, Score(facts.Facts{Files: files, TestLanguages: []string{"Shell"}}, Default()), "tests", "untested_production_files")
+	if without.Value != 0 || with.Value != 1 {
+		t.Errorf("untested without shell tests = %d, with = %d; want 0 and 1", without.Value, with.Value)
+	}
+}
