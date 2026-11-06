@@ -99,6 +99,41 @@ repo-relative path, and `**/` matches any directories.
   a path.
 - Any directory named `spec/` or `test/` is classed test whatever the language.
 
+### Tests and their pairs
+
+Each test file names the production file it tests, from its file name alone.
+The rules are owned by `internal/facts/pairs.go`; for a file `x`:
+
+| Language | Production files | Test names |
+| --- | --- | --- |
+| Go | `.go` | `x_test.go` |
+| Python | `.py` | `test_x.py`, `x_test.py` |
+| .NET | `.cs` | `xTests.cs`, `xTest.cs` |
+| JavaScript/TypeScript | `.js`, `.jsx`, `.mjs`, `.cjs`, `.ts`, `.tsx`, `.mts`, `.cts` | `x.test.js`, `x.spec.js` (same extension as the file) |
+| Java/Kotlin | `.java`, `.kt` | `xTests.java`, `xTest.java` (same extension) |
+| Ruby | `.rb` | `x_spec.rb`, `x_test.rb` |
+| PHP | `.php` | `xTest.php` |
+| Swift | `.swift` | `xTests.swift` |
+| C/C++ | `.c`, `.cc`, `.cpp` | `x_unittest.cc` (`.cc`, `.cpp` only), `x_test.c` (same extension) |
+| Scala | `.scala` | `xSpec.scala`, `xSuite.scala`, `xTest.scala` |
+| Elixir | `.ex` | `x_test.exs` |
+| Dart | `.dart` | `x_test.dart` |
+
+- Directories are ignored, so a test in another directory still pairs; two
+  files with the same name in different directories are both paired by one test.
+- Names are case-sensitive and the extension must match (`a.ts` pairs with
+  `a.test.ts`, not `a.test.js`), except Elixir, whose `.exs` tests test `.ex`
+  code.
+- The first matching name in the table wins, so `test_x_test.py` pairs with
+  `x_test.py`.
+- A test file with no naming marker (`__tests__/a.js`, `tests/api.rs`, a file
+  in a `*.Tests` project, a fixture under `testdata/`) pairs with the file of
+  its own name.
+- Terraform, Shell and Rust have no file pairing: a Terraform test exercises a
+  module directory, a `.bats` file has no fixed subject, and Rust unit tests sit
+  inside the file they test while its `tests/` files are named by feature.
+  C/C++ headers (`.h`, `.hpp`) are not paired either.
+
 ## Estimate, then score
 
 The same scorer runs over two sources of facts:
