@@ -9,7 +9,8 @@ import (
 // leaves out docs, generated and lock files, and the tests measure looks for
 // test files. Non-code files configure the repo or hold plain data rather
 // than implement; no measure leaves them out by default yet, the rules toggle
-// does that.
+// does that. Run records are what records a change rather than makes it:
+// logs, plan output and state snapshots.
 type Class string
 
 // The path classes. Classify returns them in this order.
@@ -18,6 +19,7 @@ const (
 	ClassGenerated Class = "generated"
 	ClassLock      Class = "lock"
 	ClassNonCode   Class = "non_code"
+	ClassRunRecord Class = "run_record"
 	ClassTest      Class = "test"
 )
 
@@ -73,6 +75,22 @@ var builtin = []struct {
 		"**/.env.example",
 		// plain data
 		"**/*.csv",
+	}},
+	{ClassRunRecord, []string{
+		// logs
+		"**/*.log",
+		// rotated logs, *.log.[0-9]* one digit at a time
+		"**/*.log.0*", "**/*.log.1*", "**/*.log.2*", "**/*.log.3*", "**/*.log.4*",
+		"**/*.log.5*", "**/*.log.6*", "**/*.log.7*", "**/*.log.8*", "**/*.log.9*",
+		// log directories; log/ only at the root, as **/log/** would take in
+		// source packages such as internal/log
+		"**/logs/**", "log/**",
+		// package-manager debug logs
+		"**/npm-debug.log*", "**/yarn-error.log*", "**/yarn-debug.log*", "**/pnpm-debug.log*", "**/lerna-debug.log*",
+		// Terraform plan output
+		"**/*.tfplan", "**/tfplan", "**/*.tfplan.json", "**/tfplan.json", "**/*.tfplan.txt", "**/tfplan.txt",
+		// state snapshots
+		"**/*.tfstate", "**/*.tfstate.*",
 	}},
 	{ClassTest, []string{
 		// Go

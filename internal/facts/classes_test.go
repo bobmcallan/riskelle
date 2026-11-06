@@ -229,10 +229,95 @@ func TestClassifyMultipleClasses(t *testing.T) {
 	}
 }
 
+// TestClassifyRunRecords pins the run-record catalog: every listed path is
+// classed run record, near misses are not, and every built-in run-record
+// pattern is exercised by at least one row.
+func TestClassifyRunRecords(t *testing.T) {
+	run := []Class{ClassRunRecord}
+	tests := []struct {
+		path string
+		want []Class
+	}{
+		// logs
+		{"app.log", run},
+		{"svc/api/app.log", run},
+		// rotated logs
+		{"var/app.log.0", run},
+		{"var/app.log.1", run},
+		{"var/app.log.2.gz", run},
+		{"var/app.log.3", run},
+		{"var/app.log.4", run},
+		{"var/app.log.5", run},
+		{"var/app.log.6", run},
+		{"var/app.log.7", run},
+		{"var/app.log.8", run},
+		{"var/app.log.9.gz", run},
+		{"var/app.log.2026-11-06", run},
+		// log directories
+		{"logs/run.txt", run},
+		{"svc/logs/2026/a.json", run},
+		{"log/production.log", run},
+		{"log/development.txt", run},
+		// package-manager debug logs
+		{"web/npm-debug.log.123", run},
+		{"web/yarn-error.log", run},
+		{"web/yarn-debug.log.1", run},
+		{"pnpm-debug.log", run},
+		{"lerna-debug.log", run},
+		// Terraform plan output
+		{"infra/main.tfplan", run},
+		{"infra/tfplan", run},
+		{"infra/plan.tfplan.json", run},
+		{"infra/tfplan.json", run},
+		{"infra/plan.tfplan.txt", run},
+		{"infra/tfplan.txt", run},
+		// state snapshots
+		{"infra/terraform.tfstate", run},
+		{"infra/terraform.tfstate.backup", run},
+		{"infra/terraform.tfstate.1730851200.backup", run},
+		// not run records
+		{"internal/log/log.go", nil},
+		{"pkg/audit.log.go", nil},
+		{"catalog.go", nil},
+		{"CHANGELOG", nil},
+		{"web/app.logger.js", nil},
+		{"plan.json", nil},
+		{"plan.txt", nil},
+		{"infra/plan.out", nil},
+		{"infra/tfplan.go", nil},
+		// a run record in another class too
+		{"pkg/testdata/out.log", []Class{ClassRunRecord, ClassTest}},
+		{"docs/build.log", []Class{ClassDocs, ClassRunRecord}},
+		{"vendor/x/debug.log", []Class{ClassGenerated, ClassRunRecord}},
+	}
+	for _, tt := range tests {
+		if got := Classify(tt.path); !reflect.DeepEqual(got, tt.want) {
+			t.Errorf("Classify(%q) = %v, want %v", tt.path, got, tt.want)
+		}
+	}
+	for _, c := range compiled {
+		if c.class != ClassRunRecord {
+			continue
+		}
+		for _, re := range c.patterns {
+			hit := false
+			for _, tt := range tests {
+				if tt.want != nil && re.MatchString(tt.path) {
+					hit = true
+					break
+				}
+			}
+			if !hit {
+				t.Errorf("run-record pattern %s has no test path", re)
+			}
+		}
+	}
+}
+
 // TestBuiltinOrder pins that the table lists each class once, in Class order,
 // which is what keeps Classify's result sorted.
 func TestBuiltinOrder(t *testing.T) {
-	want := []Class{ClassDocs, ClassGenerated, ClassLock, ClassNonCode, ClassTest}
+	want := []Class{ClassDocs, ClassGenerated, ClassLock, ClassNonCode, ClassRunRecord, ClassTest}
 	var got []Class
 	for _, b := range builtin {
 		got = append(got, b.class)
@@ -256,6 +341,25 @@ func TestReadmeListsTestCatalog(t *testing.T) {
 		for _, p := range b.patterns {
 			if !strings.Contains(string(readme), "`"+p+"`") {
 				t.Errorf("README does not list test pattern `%s`", p)
+			}
+		}
+	}
+}
+
+// TestReadmeListsRunRecords pins that the README's run-record catalog names
+// every built-in run-record pattern as a code span, so the two cannot drift.
+func TestReadmeListsRunRecords(t *testing.T) {
+	readme, err := os.ReadFile("../../README.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, b := range builtin {
+		if b.class != ClassRunRecord {
+			continue
+		}
+		for _, p := range b.patterns {
+			if !strings.Contains(string(readme), "`"+p+"`") {
+				t.Errorf("README does not list run-record pattern `%s`", p)
 			}
 		}
 	}

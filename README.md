@@ -236,6 +236,26 @@ line it leaves for reviewers, is in the skill file itself.
 
 Every report records the riskelle version and the rules hash it was scored with.
 
+### Run records
+
+Paths that record a change rather than make it (logs, plan output, state
+snapshots) are classed `run_record` in the facts `"classes"`, by the built-in
+catalog below, owned by `internal/facts/classes.go`. Patterns are case-sensitive
+globs over the repo-relative path: `**/` matches any directories, `*` any
+characters but `/`, and `?` one such character.
+
+| Group | Patterns |
+| --- | --- |
+| Logs | `**/*.log` |
+| Rotated logs | `**/*.log.0*`, `**/*.log.1*`, `**/*.log.2*`, `**/*.log.3*`, `**/*.log.4*`, `**/*.log.5*`, `**/*.log.6*`, `**/*.log.7*`, `**/*.log.8*`, `**/*.log.9*` |
+| Log directories | `**/logs/**`, `log/**` (repo root only, so source packages such as `internal/log` are not run records) |
+| Package-manager debug logs | `**/npm-debug.log*`, `**/yarn-error.log*`, `**/yarn-debug.log*`, `**/pnpm-debug.log*`, `**/lerna-debug.log*` |
+| Terraform plan output | `**/*.tfplan`, `**/tfplan`, `**/*.tfplan.json`, `**/tfplan.json`, `**/*.tfplan.txt`, `**/tfplan.txt` |
+| State snapshots | `**/*.tfstate`, `**/*.tfstate.*` |
+
+Tenant and other snapshots have no shared naming convention, so they are not in
+the built-in catalog.
+
 ## Where it runs
 
 - Locally, by developers and coding agents.

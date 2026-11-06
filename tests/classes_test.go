@@ -54,6 +54,9 @@ func TestCollectClassifiesChangedPaths(t *testing.T) {
 		"config/app.toml":        {"non_code"},
 		"data/rates.csv":         {"non_code"},
 		"pkg/testdata/rates.csv": {"non_code", "test"},
+		// run records
+		"logs/run.log":      {"run_record"},
+		"infra/main.tfplan": {"run_record"},
 	}
 	for p := range changed {
 		writeFile(t, dir, p, "x\n")
