@@ -57,8 +57,8 @@ func TestDefaultRulesValid(t *testing.T) {
 // rules are in the binary, not in a file beside it.
 func TestScoreNeedsNoDisk(t *testing.T) {
 	t.Chdir(t.TempDir())
-	if r := Score(mixed(), Default()); r.Total != 19 || r.Level != Low {
-		t.Errorf("total %d level %q, want 19 Low", r.Total, r.Level)
+	if r := Score(mixed(), Default()); r.Total != 29 || r.Level != Medium {
+		t.Errorf("total %d level %q, want 29 Medium", r.Total, r.Level)
 	}
 }
 
@@ -67,6 +67,7 @@ func TestScoreNeedsNoDisk(t *testing.T) {
 // import only what is listed here.
 func TestScorePackageImportsArePure(t *testing.T) {
 	allowed := map[string]bool{
+		"path": true, // pure string operations on slash-separated paths
 		"sort": true,
 		"github.com/bobmcallan/riskelle/internal/facts": true,
 	}

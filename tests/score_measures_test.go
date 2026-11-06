@@ -17,8 +17,9 @@ import (
 // scores it with the built-in rules, pinning the degree, branch age and tests
 // entries against values worked out from the fixture by hand. The branch
 // rewrites 30 lines of an existing file with no test, adds a new file eight
-// days later, and the trunk gains 11 commits meanwhile. A second head adds a
-// test on top of the same branch, which takes the tests points away.
+// days later, and the trunk gains 11 commits meanwhile. A second head adds
+// core/calc_test.go on top of the same branch, which covers core/calc.go only:
+// core/extra.go still changes without its paired test.
 func TestScoreDegreeAgeAndTests(t *testing.T) {
 	dir := t.TempDir()
 	at := func(author, committer string, args ...string) {
@@ -93,16 +94,17 @@ func TestScoreDegreeAgeAndTests(t *testing.T) {
 	}
 
 	f, r = collect("tested")
-	// The same change with a test: tests scores nothing, the rest holds
+	// The same change with core/calc_test.go: it pairs with core/calc.go, so
+	// only core/extra.go counts as untested, still 10 points; the rest holds
 	// (age now runs to 01-10 10:00, still 8 whole days).
-	check(r, "tests", "untested_production_files", 0, 0, 0, []string{})
+	check(r, "tests", "untested_production_files", 1, 1, 10, []string{"core/extra.go"})
 	check(r, "degree", "existing_lines", 60, 26, 2, []string{"core/calc.go"})
 	check(r, "branch_age", "days", 8, 8, 6, []string{f.MergeBase + ".." + f.Head})
 	check(r, "branch_age", "trunk_commits", 11, 11, 2, []string{f.MergeBase + ".." + f.Base})
 	// size: core/calc_test.go is a test, left out, so 80 lines as before -> 5.
 	check(r, "size", "lines", 80, 51, 5, []string{"core/calc.go", "core/extra.go"})
-	// 5 + 2 + 6 + 2 = 15: Low.
-	if r.Total != 15 || r.Level != score.Low {
-		t.Errorf("tested: total %d level %q, want 15 Low", r.Total, r.Level)
+	// 5 + 2 + 6 + 2 + 10 = 25: Medium.
+	if r.Total != 25 || r.Level != score.Medium {
+		t.Errorf("tested: total %d level %q, want 25 Medium", r.Total, r.Level)
 	}
 }

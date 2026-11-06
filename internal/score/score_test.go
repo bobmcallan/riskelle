@@ -358,13 +358,13 @@ func TestBreakdownNamesMeasureAndFacts(t *testing.T) {
 	if deg.Value != existing || deg.Value != 40 || deg.Min != 26 || deg.Points != 2 {
 		t.Errorf("degree = %+v, want 40 existing lines, band 26 for 2 points", deg)
 	}
-	// main_test.go is a test change, so tests scores nothing.
-	if p := entry(t, r, "tests", "untested_production_files"); p.Value != 0 || p.Points != 0 || len(p.From) != 0 {
-		t.Errorf("tests = %+v, want 0 with a test change", p)
+	// main_test.go covers main.go only; ui/app.js changes without app.test.js.
+	if p := entry(t, r, "tests", "untested_production_files"); p.Value != 1 || p.Min != 1 || p.Points != 10 || !reflect.DeepEqual(p.From, []string{"ui/app.js"}) {
+		t.Errorf("tests = %+v, want 1 from [ui/app.js], band 1 for 10 points", p)
 	}
-	// 10 size + 2 files + 2 directories + 3 projects + 2 degree.
-	if r.Total != 19 || r.Level != Low {
-		t.Errorf("total %d level %q, want 19 Low", r.Total, r.Level)
+	// 10 size + 2 files + 2 directories + 3 projects + 2 degree + 10 tests.
+	if r.Total != 29 || r.Level != Medium {
+		t.Errorf("total %d level %q, want 29 Medium", r.Total, r.Level)
 	}
 }
 
@@ -431,12 +431,23 @@ func TestTestsMeasure(t *testing.T) {
 		wantFrom   []string
 	}{
 		{"production only", []facts.File{prod("main.go")}, 1, 10, []string{"main.go"}},
-		{"production and a test", []facts.File{prod("main.go"), of("main_test.go", facts.ClassTest)}, 0, 0, []string{}},
+		{"production and its paired test", []facts.File{prod("main.go"), of("main_test.go", facts.ClassTest)}, 0, 0, []string{}},
 		{"test only", []facts.File{of("main_test.go", facts.ClassTest)}, 0, 0, []string{}},
 		{"docs only", []facts.File{of("README.md", facts.ClassDocs)}, 0, 0, []string{}},
 		{"lock only", []facts.File{of("go.sum", facts.ClassLock)}, 0, 0, []string{}},
 		{"generated only", []facts.File{of("api/x.pb.go", facts.ClassGenerated)}, 0, 0, []string{}},
-		{"production and a snapshot", []facts.File{prod("app.js"), of("__snapshots__/a.snap", facts.ClassGenerated, facts.ClassTest)}, 0, 0, []string{}},
+		{"production and another file's test", []facts.File{prod("main.go"), of("other_test.go", facts.ClassTest)}, 1, 10, []string{"main.go"}},
+		{"paired test in another directory", []facts.File{prod("internal/calc.go"), of("tests/calc_test.go", facts.ClassTest)}, 0, 0, []string{}},
+		{"one paired, one not", []facts.File{prod("a.go"), prod("b.go"), of("a_test.go", facts.ClassTest)}, 1, 10, []string{"b.go"}},
+		{"origin PR 2149", []facts.File{prod("flow/ai_review.py"), prod("flow/risk_gate.py"), of("tests/test_ai_review.py", facts.ClassTest), of("tests/test_risk_gate.py", facts.ClassTest)}, 0, 0, []string{}},
+		{"origin, half tested", []facts.File{prod("flow/ai_review.py"), prod("flow/risk_gate.py"), of("tests/test_ai_review.py", facts.ClassTest)}, 1, 10, []string{"flow/risk_gate.py"}},
+		{"extension must match", []facts.File{prod("a.ts"), of("a.test.js", facts.ClassTest)}, 1, 10, []string{"a.ts"}},
+		{"marker-less test pairs by its own name", []facts.File{prod("app.js"), of("__tests__/app.js", facts.ClassTest)}, 0, 0, []string{}},
+		{"no convention, with a test", []facts.File{prod("deploy.yaml"), of("x_test.go", facts.ClassTest)}, 0, 0, []string{}},
+		{"no convention, no test", []facts.File{prod("deploy.yaml")}, 1, 10, []string{"deploy.yaml"}},
+		{"mixed", []facts.File{prod("a.go"), prod("deploy.yaml"), of("b_test.go", facts.ClassTest)}, 1, 10, []string{"a.go"}},
+		{"deleted with its deleted test", []facts.File{{Path: "old.go", Removed: 9}, {Path: "old_test.go", Removed: 4, Classes: []facts.Class{facts.ClassTest}}}, 0, 0, []string{}},
+		{"production and an unpaired snapshot", []facts.File{prod("app.js"), of("__snapshots__/a.snap", facts.ClassGenerated, facts.ClassTest)}, 1, 10, []string{"app.js"}},
 		{"production with docs", []facts.File{prod("main.go"), of("README.md", facts.ClassDocs)}, 1, 10, []string{"main.go"}},
 		{"two production files", []facts.File{prod("b.go"), prod("a.go")}, 2, 10, []string{"a.go", "b.go"}},
 		{"deleted production file", []facts.File{{Path: "old.go", Removed: 9}}, 1, 10, []string{"old.go"}},

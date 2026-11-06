@@ -56,10 +56,11 @@ func TestEstimateScoresLikeTheActualDiff(t *testing.T) {
 	}
 	// Pinned from the rules: size 10+1+60 = 71 lines (gen/** by the
 	// target's rules, docs and core/calc_test.go by class, left out) -> 5; 6 files -> 2; 4
-	// directories (core, docs, gen, ui) -> 2; 2 projects (., ui) -> 3; a test
-	// is changed and nothing else reaches a band: 12 Low.
-	if actual.Total != 12 || actual.Level != score.Low || actual.Provenance.RulesSource != ".risk/rules.json" {
-		t.Fatalf("actual diff scores %d %s with %q, want 12 Low with .risk/rules.json",
+	// directories (core, docs, gen, ui) -> 2; 2 projects (., ui) -> 3;
+	// core/calc_test.go pairs with core/calc.go, but ui/app.js changes without
+	// ui/app.test.js -> tests 10; nothing else reaches a band: 22 Medium.
+	if actual.Total != 22 || actual.Level != score.Medium || actual.Provenance.RulesSource != ".risk/rules.json" {
+		t.Fatalf("actual diff scores %d %s with %q, want 22 Medium with .risk/rules.json",
 			actual.Total, actual.Level, actual.Provenance.RulesSource)
 	}
 
@@ -109,7 +110,7 @@ func TestEstimateScoresLikeTheActualDiff(t *testing.T) {
 	var decoded report.Report
 	json.Unmarshal([]byte(stdout), &decoded)
 	decoded.Markdown(&wantMD)
-	if md != wantMD.String() || !strings.HasPrefix(md, "## riskelle estimate: 12 / 100, Low\n") {
+	if md != wantMD.String() || !strings.HasPrefix(md, "## riskelle estimate: 22 / 100, Medium\n") {
 		t.Errorf("markdown estimate:\n%s\nwant the JSON report rendered:\n%s", md, wantMD.String())
 	}
 

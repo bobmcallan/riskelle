@@ -1,37 +1,54 @@
 package score
 
 import (
+	"path"
 	"sort"
 
 	"github.com/bobmcallan/riskelle/internal/facts"
 )
 
-// untested scores a production change with no test change. A production file
-// is a kept file (not docs, generated, lock or test) that is not a test; a test
-// change is any changed file classed test, whatever its other classes. With
-// production files and no test change, the value is the number of production
-// files and From lists them; otherwise the value is 0 and From is empty.
+// untested scores production files changed without their paired test. A
+// production file is a kept file (not docs, generated, lock or test); a test
+// change is any changed file classed test, whatever its other classes. A
+// production file whose extension has a pairing convention (facts.HasPairing)
+// is untested unless a changed test pairs with it: the test's subject
+// (facts.TestSubject) is the file's base name, in any directory. A production
+// file with no pairing convention is untested only when no file at all is
+// classed test. The value is the number of untested production files and From
+// lists them, sorted; with none, the value is 0 and From is empty.
 func untested(all, kept []facts.File, r Rules) Point {
 	p := Point{Measure: MeasureTests, Fact: "untested_production_files", From: []string{}}
-	if !anyTest(all) {
-		for _, file := range kept {
-			p.From = append(p.From, file.Path)
+	subjects, anyTest := testSubjects(all)
+	for _, file := range kept {
+		if facts.HasPairing(file.Path) {
+			if subjects[path.Base(file.Path)] {
+				continue
+			}
+		} else if anyTest {
+			continue
 		}
-		sort.Strings(p.From)
-		p.Value = len(p.From)
+		p.From = append(p.From, file.Path)
 	}
+	sort.Strings(p.From)
+	p.Value = len(p.From)
 	band := r.TestsUntested.at(p.Value)
 	p.Min, p.Points = band.Min, band.Points
 	return p
 }
 
-func anyTest(files []facts.File) bool {
+// testSubjects returns the base names of the production files the changed
+// tests pair with, and whether any changed file is classed test.
+func testSubjects(files []facts.File) (map[string]bool, bool) {
+	subjects := map[string]bool{}
+	anyTest := false
 	for _, file := range files {
 		for _, c := range file.Classes {
 			if c == facts.ClassTest {
-				return true
+				subjects[facts.TestSubject(file.Path)] = true
+				anyTest = true
+				break
 			}
 		}
 	}
-	return false
+	return subjects, anyTest
 }

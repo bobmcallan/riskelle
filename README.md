@@ -52,7 +52,7 @@ share of their changes that are low risk, so the score must be:
 | Degree | How much *existing* code is altered, against code in new files (tests are left out, as for size) |
 | Impact | How many places depend on what changed (for Go, packages importing a changed package; otherwise files referencing a changed file) |
 | Branch age | Days from the branch's first commit to merge, and how far the trunk moved meanwhile |
-| Tests | A production change with no test change |
+| Tests | Production files changed without their paired test (see [Tests and their pairs](#tests-and-their-pairs)); a file with no pairing convention counts only when no test changed at all |
 
 A file is generated when its path matches a built-in or repo-added generated
 pattern, or when its header carries a marker. The header is the comment lines
@@ -102,7 +102,8 @@ repo-relative path, and `**/` matches any directories.
 ### Tests and their pairs
 
 Each test file names the production file it tests, from its file name alone.
-The rules are owned by `internal/facts/pairs.go`; for a file `x`:
+The tests measure counts a production file as tested when a changed test pairs
+with it. The rules are owned by `internal/facts/pairs.go`; for a file `x`:
 
 | Language | Production files | Test names |
 | --- | --- | --- |
