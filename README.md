@@ -47,9 +47,9 @@ share of their changes that are low risk, so the score must be:
 
 | Measure | What it captures |
 | --- | --- |
-| Size | Lines added and removed, excluding generated files, lock files (such as `go.sum`, `package-lock.json`, `packages.lock.json`, `*.lock` and `.terraform.lock.hcl`), docs and tests |
+| Size | Lines added and removed, excluding generated files, lock files (such as `go.sum`, `package-lock.json`, `packages.lock.json`, `*.lock` and `.terraform.lock.hcl`), docs and tests, and by default non-code files and run records (see [Rules](#rules)) |
 | Spread | Files, directories and projects (`go.mod`, `package.json`, `.csproj`) touched; a renamed file counts in its new directory only |
-| Degree | How much *existing* code is altered, against code in new files (tests are left out, as for size) |
+| Degree | How much *existing* code is altered, against code in new files (tests are left out, as for size, and by default so are non-code files and run records) |
 | Impact | How many places depend on what changed (for Go, packages importing a changed package; otherwise files referencing a changed file) |
 | Branch age | Days from the branch's first commit to merge, and how far the trunk moved meanwhile |
 | Tests | Production files changed without their paired test (see [Tests and their pairs](#tests-and-their-pairs)); a file with no pairing convention counts only when no test changed at all |
@@ -193,7 +193,7 @@ naming the plan file in `"plan"`.
 default, or as a Markdown summary for a PR comment with `--format markdown`
 (flags go before the plan file). Both carry the total and level, every
 breakdown entry with the facts behind it, and the provenance (riskelle
-version, rules source, rules commit and hash). A score names the full base
+version, rules source, rules commit and hash, and the two exclusion toggles). A score names the full base
 and head commits it measured (`"base"`, `"head"`); an estimate is marked as
 one and names its plan file. The sensitive areas the change lands in sit apart,
 under `"context"` (JSON) or "Where it lands (context, not scored)" (Markdown),
@@ -272,14 +272,29 @@ line it leaves for reviewers, is in the skill file itself.
   everywhere.
 - **`.risk/rules.json` in the assessed repo:** settings that can only *add*
   risk or context (extra generated paths for the report, extra sensitive
-  areas). It is read from the **target branch**, so a change cannot alter its
+  areas, and the exclusion toggles `exclude_non_code_files` and
+  `exclude_log_files`). It is read from the **target branch**, so a change cannot alter its
   own rules. Anything that would lower a score is refused by name. A change
   that edits `.risk/` is scored like any other change: riskelle does not try
   to guard against a dishonest developer. riskelle's own
   [`.risk/rules.json`](.risk/rules.json) is an example: it adds areas for the
   scorer and the release pipelines, and marks the report goldens generated.
 
-Every report records the riskelle version and the rules hash it was scored with.
+The exclusion toggles in `.risk/rules.json`:
+
+- `exclude_non_code_files` covers the non-code catalog: repo and editor
+  config, config formats, data, and agent and harness config.
+- `exclude_log_files` covers the run-record catalog (see
+  [Run records](#run-records)): logs, plan output and state snapshots.
+- Both are `true` by default: those files then leave size, degree and
+  untested, and always count for spread.
+- Setting one to `false` counts those files, so it can only add risk. `true`
+  is accepted as the default; any other value is refused by name.
+- There is no toggle for test files: test lines never count toward size or
+  degree.
+
+Every report records the riskelle version, the rules hash and the value of
+each exclusion toggle it was scored with.
 
 ### Run records
 

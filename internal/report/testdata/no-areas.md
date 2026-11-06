@@ -23,3 +23,5 @@ None: the change lands in no sensitive area.
 - riskelle `v0.11.0`
 - rules `built-in` at `0123456789abcdef0123456789abcdef01234567`
 - rules hash `sha256:00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff`
+- exclude_non_code_files `false`
+- exclude_log_files `false`

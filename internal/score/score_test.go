@@ -501,3 +501,16 @@ func TestBranchAgeFrom(t *testing.T) {
 		}
 	}
 }
+
+// TestProvenanceJSON pins the provenance keys, their order, and that a false
+// exclusion toggle is recorded rather than omitted.
+func TestProvenanceJSON(t *testing.T) {
+	got, err := json.Marshal(Provenance{RulesHash: "h", ExcludeNonCodeFiles: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"riskelle_version":"","rules_source":"","rules_commit":"","rules_hash":"h","exclude_non_code_files":true,"exclude_log_files":false}`
+	if string(got) != want {
+		t.Errorf("Provenance JSON = %s, want %s", got, want)
+	}
+}

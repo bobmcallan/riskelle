@@ -35,7 +35,7 @@ func golden(t *testing.T, name string, got []byte) {
 }
 
 var provenance = score.Provenance{
-	Version: "v0.11.0", RulesSource: ".risk/rules.json",
+	Version: "v0.11.0", RulesSource: ".risk/rules.json", ExcludeNonCodeFiles: true,
 	RulesCommit: "0123456789abcdef0123456789abcdef01234567",
 	RulesHash:   "sha256:00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff",
 }

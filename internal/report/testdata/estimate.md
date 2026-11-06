@@ -26,3 +26,5 @@ Where the change lands is context for reviewers; it does not count towards the s
 - riskelle `v0.11.0`
 - rules `.risk/rules.json` at `0123456789abcdef0123456789abcdef01234567`
 - rules hash `sha256:00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff`
+- exclude_non_code_files `true`
+- exclude_log_files `false`

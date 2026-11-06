@@ -67,6 +67,9 @@ type Provenance struct {
 	RulesSource string `json:"rules_source"`     // "built-in" or ".risk/rules.json"
 	RulesCommit string `json:"rules_commit"`     // full SHA of the target-branch commit the rules were read at
 	RulesHash   string `json:"rules_hash"`       // "sha256:" + hex of the effective rules' JSON
+
+	ExcludeNonCodeFiles bool `json:"exclude_non_code_files"` // non-code files left out of size, degree and untested
+	ExcludeLogFiles     bool `json:"exclude_log_files"`      // run records left out of size, degree and untested
 }
 
 // Score scores the facts of one change against rules. Every breakdown entry is

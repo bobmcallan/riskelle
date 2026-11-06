@@ -116,8 +116,9 @@ func (r Report) Markdown(w io.Writer) error {
 	}
 
 	pv := r.Provenance
-	fmt.Fprintf(&b, "\n### Provenance\n\n- riskelle %s\n- rules %s at %s\n- rules hash %s\n",
-		code(pv.Version), code(pv.RulesSource), code(pv.RulesCommit), code(pv.RulesHash))
+	fmt.Fprintf(&b, "\n### Provenance\n\n- riskelle %s\n- rules %s at %s\n- rules hash %s\n- exclude_non_code_files %s\n- exclude_log_files %s\n",
+		code(pv.Version), code(pv.RulesSource), code(pv.RulesCommit), code(pv.RulesHash),
+		code(strconv.FormatBool(pv.ExcludeNonCodeFiles)), code(strconv.FormatBool(pv.ExcludeLogFiles)))
 	_, err := w.Write(b.Bytes())
 	return err
 }

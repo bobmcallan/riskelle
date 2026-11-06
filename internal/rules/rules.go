@@ -38,6 +38,27 @@ const SourceBuiltin = "built-in"
 type File struct {
 	Generated []string            `json:"generated"` // extra generated-path globs in the built-in syntax; size leaves them out
 	Areas     map[string][]string `json:"areas"`     // extra sensitive areas: globs by area name, added to the built-in ones; report context, never scored
+
+	// The exclusion toggles: nil (absent) or true leaves the class's files out
+	// of size, degree and untested, the default; false counts them, which can
+	// only add risk. Any other value is refused by name (see Parse).
+	ExcludeNonCodeFiles *bool `json:"exclude_non_code_files"` // the non_code catalog
+	ExcludeLogFiles     *bool `json:"exclude_log_files"`      // the run_record catalog
+}
+
+// toggle is one exclusion toggle: its key, the class it governs and its value
+// in a File.
+type toggle struct {
+	key   string
+	class facts.Class
+	get   func(File) *bool
+}
+
+// toggles names each exclusion toggle's key, the class it governs and its
+// value in a File, in Class order, so the effective rules have one fixed order.
+var toggles = []toggle{
+	{"exclude_non_code_files", facts.ClassNonCode, func(f File) *bool { return f.ExcludeNonCodeFiles }},
+	{"exclude_log_files", facts.ClassRunRecord, func(f File) *bool { return f.ExcludeLogFiles }},
 }
 
 // areaName is what an area name may be.
@@ -75,6 +96,9 @@ func jsonKeys(t reflect.Type) []string {
 // an error, so no setting is silently ignored.
 func Parse(data []byte) (File, error) {
 	if err := refuse(data); err != nil {
+		return File{}, err
+	}
+	if err := checkToggles(data); err != nil {
 		return File{}, err
 	}
 	dec := json.NewDecoder(bytes.NewReader(data))
@@ -139,10 +163,46 @@ func refuse(data []byte) error {
 		strings.Join(names, ", "), Path)
 }
 
+// checkToggles returns an error naming, in sorted order, every exclusion
+// toggle in data whose value is not exactly true or false, with that value.
+// Keys match case-insensitively, as encoding/json matches fields, and null is
+// refused though encoding/json would accept it into a *bool. Data that is not
+// a JSON object is left to Parse's strict decode to report.
+func checkToggles(data []byte) error {
+	var obj map[string]json.RawMessage
+	if json.NewDecoder(bytes.NewReader(data)).Decode(&obj) != nil {
+		return nil
+	}
+	var items []string
+	for k, raw := range obj {
+		isToggle := slices.ContainsFunc(toggles, func(t toggle) bool { return t.key == strings.ToLower(k) })
+		if v := string(bytes.TrimSpace(raw)); isToggle && v != "true" && v != "false" {
+			items = append(items, strconv.Quote(k)+" = "+v)
+		}
+	}
+	if len(items) == 0 {
+		return nil
+	}
+	slices.Sort(items)
+	return fmt.Errorf("refused %s: %s may set an exclusion toggle only to false, which counts those files, or to true, the default",
+		strings.Join(items, ", "), Path)
+}
+
 // Apply returns r with the file's additions merged in: Generated becomes the
 // sorted, de-duplicated union of both, nil when empty, and so does each area's
-// patterns in Areas, a fresh map nil when empty. r is not changed.
+// patterns in Areas, a fresh map nil when empty. Each exclusion toggle that
+// is absent or true adds its class to SizeExcludes once; one set to false
+// removes it, so its files count. r is not changed.
 func Apply(r score.Rules, f File) score.Rules {
+	ex := slices.Clone(r.SizeExcludes)
+	for _, t := range toggles {
+		if v := t.get(f); v != nil && !*v {
+			ex = slices.DeleteFunc(ex, func(c facts.Class) bool { return c == t.class })
+		} else if !slices.Contains(ex, t.class) {
+			ex = append(ex, t.class)
+		}
+	}
+	r.SizeExcludes = ex
 	r.Generated = union(r.Generated, f.Generated)
 	var areas map[string][]string
 	for _, m := range []map[string][]string{r.Areas, f.Areas} {
@@ -181,22 +241,24 @@ func Hash(r score.Rules) string {
 
 // Load returns the built-in rules plus .risk/rules.json as it is at commit (a
 // full SHA, recorded as given), and their provenance. With no file the
-// built-in rules apply unchanged; a file that does not parse is an error,
-// never a silent fall back.
+// built-in rules apply with their default toggles; a file that does not parse
+// is an error, never a silent fall back.
 func Load(ctx context.Context, repo, commit string) (score.Rules, score.Provenance, error) {
-	r := score.Default()
+	var f File
 	prov := score.Provenance{Version: version.Get().String(), RulesSource: SourceBuiltin, RulesCommit: commit}
 	data, found, err := facts.ReadFileAt(ctx, repo, commit, Path)
 	if err == nil && found {
-		var f File
 		if f, err = Parse(data); err == nil {
-			r, prov.RulesSource = Apply(r, f), Path
+			prov.RulesSource = Path
 		}
 	}
 	if err != nil {
 		return score.Rules{}, score.Provenance{}, fmt.Errorf("rules: %s at %s: %w", Path, commit, err)
 	}
+	r := Apply(score.Default(), f)
 	prov.RulesHash = Hash(r)
+	prov.ExcludeNonCodeFiles = slices.Contains(r.SizeExcludes, facts.ClassNonCode)
+	prov.ExcludeLogFiles = slices.Contains(r.SizeExcludes, facts.ClassRunRecord)
 	return r, prov, nil
 }
 
