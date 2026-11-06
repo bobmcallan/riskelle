@@ -114,7 +114,8 @@ func TestCollectFactsFromAFixtureRepository(t *testing.T) {
 		`{"path":"pkg/a.go","added":1,"removed":1},` +
 		`{"path":"ui/app.js","added":1,"removed":0},` +
 		`{"path":"ui/icon.ico","added":0,"removed":0,"binary":true,"new":true}],` +
-		`"directories":["notes","notes/done","pkg","ui"],` +
+		// The rename notes/todo.md -> notes/done/todo.md counts in notes/done only.
+		`"directories":["notes/done","pkg","ui"],` +
 		`"projects":[".","ui"],` +
 		`"degree":{"existing":{"added":2,"removed":1},"new":{"added":0,"removed":0}},` +
 		`"impact":{"packages":[{"name":"example.com/m/pkg","dependents":0}],` +

@@ -132,7 +132,9 @@ func TestCollect(t *testing.T) {
 			{Path: "web/src/new.js", Added: 4, New: true},
 			{Path: "web/src/new.test.js", Added: 1, New: true, Classes: []Class{ClassTest}},
 		},
-		Directories: []string{".", "app", "bin", "cli", "docs", "docs/guide", "svc", "web/src"},
+		// A rename counts in its new directory only: docs (where docs/old.md
+		// lived) is not touched.
+		Directories: []string{".", "app", "bin", "cli", "docs/guide", "svc", "web/src"},
 		Projects:    []string{"app", "svc", "web"},
 		// Existing: app/main.go +2 -1, the renamed docs/guide/new.md +1 and
 		// the deleted svc/Program.cs -3. New: cli/run.go +3, web/src/new.js +4,
@@ -190,6 +192,66 @@ func TestCollectIsDeterministic(t *testing.T) {
 	}
 	if first.Degree == (Degree{}) || first.Degree != third.Degree {
 		t.Errorf("degree = %+v then %+v, want the same non-zero split", first.Degree, third.Degree)
+	}
+}
+
+// TestCollectMoveCountsNewDirectoryOnly moves three files from one project's
+// directory to another's: spread counts only the new directory and project,
+// while impact still checks every old path.
+func TestCollectMoveCountsNewDirectoryOnly(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	dir := t.TempDir()
+	runGit(t, dir, "init", "--quiet", "--initial-branch=main")
+	write(t, dir, "alpha/package.json", "{}\n")
+	write(t, dir, "alpha/stack/main.tf", "resource \"a\" \"main\" {\n  name = \"main\"\n  size = 1\n}\n")
+	write(t, dir, "alpha/stack/vars.tf", "variable \"region\" {\n  type    = string\n  default = \"west\"\n}\n")
+	write(t, dir, "alpha/stack/outputs.tf", "output \"id\" {\n  value       = a.main.id\n  description = \"id\"\n}\n")
+	write(t, dir, "beta/package.json", "{\"name\": \"beta\"}\n")
+	runGit(t, dir, "add", ".")
+	runGit(t, dir, "commit", "--quiet", "-m", "base")
+
+	runGit(t, dir, "switch", "--quiet", "-c", "feature")
+	if err := os.MkdirAll(filepath.Join(dir, "beta", "stack"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	moved := []string{"main.tf", "outputs.tf", "vars.tf"}
+	for _, name := range moved {
+		runGit(t, dir, "mv", "alpha/stack/"+name, "beta/stack/"+name)
+	}
+	runGit(t, dir, "commit", "--quiet", "-m", "move")
+
+	got, err := Collect(context.Background(), dir, "main", "feature")
+	if err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+
+	if len(got.Files) != len(moved) {
+		t.Fatalf("Files = %+v, want %d renames", got.Files, len(moved))
+	}
+	for i, name := range moved {
+		f := got.Files[i]
+		if f.Path != "beta/stack/"+name || f.OldPath != "alpha/stack/"+name {
+			t.Errorf("Files[%d] = %+v, want a rename alpha/stack/%s -> beta/stack/%s", i, f, name, name)
+		}
+	}
+	if want := []string{"beta/stack"}; !reflect.DeepEqual(got.Directories, want) {
+		t.Errorf("Directories = %v, want %v", got.Directories, want)
+	}
+	if want := []string{"beta"}; !reflect.DeepEqual(got.Projects, want) {
+		t.Errorf("Projects = %v, want %v", got.Projects, want)
+	}
+	inImpact := map[string]bool{}
+	for _, d := range got.Impact.Files {
+		inImpact[d.Name] = true
+	}
+	for _, name := range moved {
+		for _, p := range []string{"alpha/stack/" + name, "beta/stack/" + name} {
+			if !inImpact[p] {
+				t.Errorf("Impact.Files = %+v, missing %s", got.Impact.Files, p)
+			}
+		}
 	}
 }
 

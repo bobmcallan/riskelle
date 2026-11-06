@@ -71,8 +71,12 @@ func Collect(ctx context.Context, repo, base, head string) (Facts, error) {
 	}
 	markNew(files, atBase)
 
-	var touched []string
+	// Spread counts where the change leaves each file: a rename counts in its
+	// head directory and project only. Impact still checks the old path, since
+	// whatever referenced it is affected by the move.
+	var heads, touched []string
 	for _, f := range files {
+		heads = append(heads, f.Path)
 		touched = append(touched, f.Path)
 		if f.OldPath != "" {
 			touched = append(touched, f.OldPath)
@@ -87,8 +91,8 @@ func Collect(ctx context.Context, repo, base, head string) (Facts, error) {
 		MergeBase:   mergeBase,
 		Head:        headSHA,
 		Files:       files,
-		Directories: Directories(touched),
-		Projects:    Projects(touched, sorted(roots)),
+		Directories: Directories(heads),
+		Projects:    Projects(heads, sorted(roots)),
 		Degree:      DegreeOf(files),
 		Impact:      impact,
 
