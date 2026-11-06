@@ -127,15 +127,19 @@ func TestImpactInTotal(t *testing.T) {
 	}{
 		{201, 6, 3, 10, 18, Low},       // 10+2+2+4
 		{201, 6, 3, 11, 21, Medium},    // 10+2+2+7
-		{801, 1, 0, 20, 37, Medium},    // 30+7
-		{801, 1, 0, 21, 40, High},      // 30+10
+		{801, 2, 0, 20, 37, Medium},    // 30+7
+		{801, 2, 0, 21, 40, High},      // 30+10
 		{10000, 16, 9, 1000, 54, High}, // 30+8+6+10, no projects
 	}
 	for _, tt := range tests {
 		f := facts.Facts{Directories: names("d", tt.dirs)}
-		// New files with a test change, so degree and tests score 0.
-		f.Files = []facts.File{{Path: "main_test.go", Added: tt.lines, New: true, Classes: []facts.Class{facts.ClassTest}}}
-		for _, p := range names("f", tt.files-1) {
+		// New files with a test change, so degree and tests score 0; main.go
+		// carries the lines, since a test's lines are left out of size.
+		f.Files = []facts.File{
+			{Path: "main.go", Added: tt.lines, New: true},
+			{Path: "main_test.go", New: true, Classes: []facts.Class{facts.ClassTest}},
+		}
+		for _, p := range names("f", tt.files-2) {
 			f.Files = append(f.Files, facts.File{Path: p, New: true})
 		}
 		f.Impact.Packages = []facts.Dependency{{Name: "example.com/m", Dependents: tt.dependents}}

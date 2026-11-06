@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 
@@ -57,18 +58,19 @@ func TestScoreCollectedFacts(t *testing.T) {
 		t.Errorf("score differs between runs:\n%s\n%s", runs[0], runs[1])
 	}
 
-	// size: 120+30+60 = 210 lines -> band 201, 10 points.
+	// size: 120+60 = 180 lines -> band 51, 5 points; core/calc_test.go is a
+	// test, left out with the doc, lock file and generated code.
 	// spread: 6 files -> 2, 5 directories (., api, core, docs, ui) -> 4,
 	// 2 projects (., ui) -> 3. Every file is new, so degree is 0; the trunk
 	// did not move and the branch's one commit is its first, so branch age
 	// is 0; core/calc_test.go is a test change, so tests is 0. impact:
 	// nothing depends on the changed packages or ui/app.js -> 0; the doc and
 	// lock file are left out, and api/svc.pb.go counts as its package.
-	// Total 19: Low.
-	want := `{"total":19,"level":"Low","breakdown":[` +
-		`{"measure":"size","fact":"lines","value":210,"min":201,"points":10,` +
-		`"from":["core/calc.go","core/calc_test.go","ui/app.js"],` +
-		`"excluded":["api/svc.pb.go","docs/guide.md","go.sum"]},` +
+	// Total 14: Low.
+	want := `{"total":14,"level":"Low","breakdown":[` +
+		`{"measure":"size","fact":"lines","value":180,"min":51,"points":5,` +
+		`"from":["core/calc.go","ui/app.js"],` +
+		`"excluded":["api/svc.pb.go","core/calc_test.go","docs/guide.md","go.sum"]},` +
 		`{"measure":"spread","fact":"files","value":6,"min":6,"points":2,` +
 		`"from":["api/svc.pb.go","core/calc.go","core/calc_test.go","docs/guide.md","go.sum","ui/app.js"]},` +
 		`{"measure":"spread","fact":"directories","value":5,"min":5,"points":4,` +
@@ -84,6 +86,29 @@ func TestScoreCollectedFacts(t *testing.T) {
 		`"dependents":[{"name":"example.com/m/api","dependents":0},{"name":"example.com/m/core","dependents":0},{"name":"ui/app.js","dependents":0}]}]}`
 	if runs[0] != want {
 		t.Errorf("score =\n%s\nwant\n%s", runs[0], want)
+	}
+}
+
+// TestReadmeSizeAndDegreeLeaveOutTests pins that the README's Measures
+// table says test files are left out of size and degree.
+func TestReadmeSizeAndDegreeLeaveOutTests(t *testing.T) {
+	readme, err := os.ReadFile("../README.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range []string{"| Size |", "| Degree |"} {
+		found := false
+		for _, line := range strings.Split(string(readme), "\n") {
+			if strings.HasPrefix(line, row) {
+				found = true
+				if !strings.Contains(line, "tests") {
+					t.Errorf("README row %q does not say tests are left out: %s", row, line)
+				}
+			}
+		}
+		if !found {
+			t.Errorf("README has no row starting %q", row)
+		}
 	}
 }
 

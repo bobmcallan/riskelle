@@ -54,8 +54,8 @@ func TestEstimateScoresLikeTheActualDiff(t *testing.T) {
 	if err != nil {
 		t.Fatalf("rules.Score: %v", err)
 	}
-	// Pinned from the rules: size 10+30+1+60 = 101 lines (gen/** by the
-	// target's rules, docs by class, left out) -> 5; 6 files -> 2; 4
+	// Pinned from the rules: size 10+1+60 = 71 lines (gen/** by the
+	// target's rules, docs and core/calc_test.go by class, left out) -> 5; 6 files -> 2; 4
 	// directories (core, docs, gen, ui) -> 2; 2 projects (., ui) -> 3; a test
 	// is changed and nothing else reaches a band: 12 Low.
 	if actual.Total != 12 || actual.Level != score.Low || actual.Provenance.RulesSource != ".risk/rules.json" {

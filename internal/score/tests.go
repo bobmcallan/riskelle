@@ -7,7 +7,7 @@ import (
 )
 
 // untested scores a production change with no test change. A production file
-// is a kept file (not docs, generated or lock) that is not a test; a test
+// is a kept file (not docs, generated, lock or test) that is not a test; a test
 // change is any changed file classed test, whatever its other classes. With
 // production files and no test change, the value is the number of production
 // files and From lists them; otherwise the value is 0 and From is empty.

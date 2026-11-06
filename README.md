@@ -47,9 +47,9 @@ share of their changes that are low risk, so the score must be:
 
 | Measure | What it captures |
 | --- | --- |
-| Size | Lines added and removed, excluding generated files, lock files (such as `go.sum`, `package-lock.json`, `packages.lock.json`, `*.lock` and `.terraform.lock.hcl`) and docs |
+| Size | Lines added and removed, excluding generated files, lock files (such as `go.sum`, `package-lock.json`, `packages.lock.json`, `*.lock` and `.terraform.lock.hcl`), docs and tests |
 | Spread | Files, directories and projects (`go.mod`, `package.json`, `.csproj`) touched; a renamed file counts in its new directory only |
-| Degree | How much *existing* code is altered, against code in new files |
+| Degree | How much *existing* code is altered, against code in new files (tests are left out, as for size) |
 | Impact | How many places depend on what changed (for Go, packages importing a changed package; otherwise files referencing a changed file) |
 | Branch age | Days from the branch's first commit to merge, and how far the trunk moved meanwhile |
 | Tests | A production change with no test change |
@@ -137,7 +137,7 @@ a JSON plan file that predicts the change:
   - `added`, `removed`: expected line counts, non-negative. At least one must
     be given; an absent one is 0.
   - Planned tests are the test files listed (they are classed from the path,
-    as in a real diff).
+    as in a real diff, and their lines are left out of size and degree).
   - A planned path that exists at the target is also classed generated when
     its header there carries a marker.
   - A move is its old path with the removed lines plus its new path with the

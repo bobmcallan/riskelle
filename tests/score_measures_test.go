@@ -99,7 +99,9 @@ func TestScoreDegreeAgeAndTests(t *testing.T) {
 	check(r, "degree", "existing_lines", 60, 26, 2, []string{"core/calc.go"})
 	check(r, "branch_age", "days", 8, 8, 6, []string{f.MergeBase + ".." + f.Head})
 	check(r, "branch_age", "trunk_commits", 11, 11, 2, []string{f.MergeBase + ".." + f.Base})
-	// size 85 lines -> 5; 5 + 2 + 6 + 2 = 15: Low.
+	// size: core/calc_test.go is a test, left out, so 80 lines as before -> 5.
+	check(r, "size", "lines", 80, 51, 5, []string{"core/calc.go", "core/extra.go"})
+	// 5 + 2 + 6 + 2 = 15: Low.
 	if r.Total != 15 || r.Level != score.Low {
 		t.Errorf("tested: total %d level %q, want 15 Low", r.Total, r.Level)
 	}

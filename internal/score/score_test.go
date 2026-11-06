@@ -136,27 +136,31 @@ func TestLevelEdges(t *testing.T) {
 }
 
 // TestTotalLevel drives the total to each side of each level edge through
-// Score itself. files counts main_test.go, which carries the lines; every
-// file is new and a test is present, so degree and tests add nothing.
+// Score itself. files counts main.go, which carries the lines, and an empty
+// main_test.go; every file is new and a test is present, so degree and tests
+// add nothing.
 func TestTotalLevel(t *testing.T) {
 	tests := []struct {
 		lines, files, dirs, projects int
 		wantTotal                    int
 		want                         Level
 	}{
-		{0, 1, 0, 0, 0, Low},
+		{0, 2, 0, 0, 0, Low},
 		{201, 6, 3, 2, 17, Low},    // 10+2+2+3
 		{201, 11, 3, 2, 19, Low},   // 10+4+2+3: highest Low
-		{401, 1, 0, 0, 20, Medium}, // lowest Medium
-		{801, 1, 0, 0, 30, Medium},
+		{401, 2, 0, 0, 20, Medium}, // lowest Medium
+		{801, 2, 0, 0, 30, Medium},
 		{801, 6, 5, 2, 39, Medium}, // 30+2+4+3: highest Medium
 		{801, 6, 3, 3, 40, High},   // 30+2+2+6: lowest High
 		{801, 16, 9, 3, 50, High},  // every built-in band at its top
 	}
 	for _, tt := range tests {
 		f := facts.Facts{Directories: names("d", tt.dirs), Projects: names("p", tt.projects)}
-		f.Files = []facts.File{{Path: "main_test.go", Added: tt.lines, New: true, Classes: []facts.Class{facts.ClassTest}}}
-		for _, p := range names("f", tt.files-1) {
+		f.Files = []facts.File{
+			{Path: "main.go", Added: tt.lines, New: true},
+			{Path: "main_test.go", New: true, Classes: []facts.Class{facts.ClassTest}},
+		}
+		for _, p := range names("f", tt.files-2) {
 			f.Files = append(f.Files, facts.File{Path: p, New: true})
 		}
 		r := Score(f, Default())
@@ -215,7 +219,7 @@ func TestTotalBounds(t *testing.T) {
 	}
 }
 
-func TestSizeExcludesDocsGeneratedLock(t *testing.T) {
+func TestSizeExcludesDocsGeneratedLockTest(t *testing.T) {
 	f := facts.Facts{Files: []facts.File{
 		{Path: "README.md", Added: 500, Classes: []facts.Class{facts.ClassDocs}},
 		{Path: "go.sum", Added: 300, Classes: []facts.Class{facts.ClassLock}},
@@ -224,13 +228,13 @@ func TestSizeExcludesDocsGeneratedLock(t *testing.T) {
 		{Path: "main_test.go", Added: 15, Classes: []facts.Class{facts.ClassTest}},
 	}}
 	p := entry(t, Score(f, Default()), "size", "lines")
-	if p.Value != 55 || p.Points != 5 {
-		t.Errorf("size value %d points %d, want 55 and 5", p.Value, p.Points)
+	if p.Value != 40 || p.Points != 0 {
+		t.Errorf("size value %d points %d, want 40 and 0", p.Value, p.Points)
 	}
-	if want := []string{"main.go", "main_test.go"}; !reflect.DeepEqual(p.From, want) {
+	if want := []string{"main.go"}; !reflect.DeepEqual(p.From, want) {
 		t.Errorf("size from %v, want %v", p.From, want)
 	}
-	if want := []string{"README.md", "api/x.pb.go", "go.sum"}; !reflect.DeepEqual(p.Excluded, want) {
+	if want := []string{"README.md", "api/x.pb.go", "go.sum", "main_test.go"}; !reflect.DeepEqual(p.Excluded, want) {
 		t.Errorf("size excluded %v, want %v", p.Excluded, want)
 	}
 
@@ -241,6 +245,45 @@ func TestSizeExcludesDocsGeneratedLock(t *testing.T) {
 	p = entry(t, Score(snap, Default()), "size", "lines")
 	if p.Value != 0 || !reflect.DeepEqual(p.Excluded, []string{"__snapshots__/a.snap"}) {
 		t.Errorf("snapshot: value %d excluded %v, want 0 and the snapshot", p.Value, p.Excluded)
+	}
+}
+
+// TestTestLinesLeftOutOfSizeAndDegree pins that test files' lines never
+// count toward size or degree: a change scores the same size and degree with
+// or without its tests, while the tests measure still sees them.
+func TestTestLinesLeftOutOfSizeAndDegree(t *testing.T) {
+	calc := facts.File{Path: "calc.go", Added: 20, Removed: 5}
+	alone := Score(facts.Facts{Files: []facts.File{calc}}, Default())
+	tested := Score(facts.Facts{Files: []facts.File{
+		calc,
+		{Path: "calc_test.go", Added: 300, Removed: 100, Classes: []facts.Class{facts.ClassTest}},
+		{Path: "tests/calc_test.go", Added: 200, New: true, Classes: []facts.Class{facts.ClassTest}},
+	}}, Default())
+
+	size := entry(t, tested, "size", "lines")
+	if size.Value != 25 || !reflect.DeepEqual(size.From, []string{"calc.go"}) {
+		t.Errorf("size = %+v, want 25 lines from [calc.go]", size)
+	}
+	if want := []string{"calc_test.go", "tests/calc_test.go"}; !reflect.DeepEqual(size.Excluded, want) {
+		t.Errorf("size excluded %v, want %v", size.Excluded, want)
+	}
+	deg := entry(t, tested, "degree", "existing_lines")
+	if deg.Value != 25 || !reflect.DeepEqual(deg.From, []string{"calc.go"}) {
+		t.Errorf("degree = %+v, want 25 lines from [calc.go]", deg)
+	}
+
+	for _, m := range [][2]string{{"size", "lines"}, {"degree", "existing_lines"}} {
+		a, b := entry(t, alone, m[0], m[1]), entry(t, tested, m[0], m[1])
+		if a.Value != b.Value || a.Points != b.Points || !reflect.DeepEqual(a.From, b.From) {
+			t.Errorf("%s/%s differs with tests: alone %+v, with tests %+v", m[0], m[1], a, b)
+		}
+	}
+
+	if p := entry(t, alone, "tests", "untested_production_files"); p.Points != 10 {
+		t.Errorf("tests alone = %+v, want 10 points", p)
+	}
+	if p := entry(t, tested, "tests", "untested_production_files"); p.Points != 0 {
+		t.Errorf("tests with tests = %+v, want 0 points", p)
 	}
 }
 
@@ -291,17 +334,19 @@ func TestBreakdownNamesMeasureAndFacts(t *testing.T) {
 			lines += file.Added + file.Removed
 		}
 	}
-	if size.Value != lines || size.Value != 275 || size.Min != 201 || size.Points != 10 {
-		t.Errorf("size = %+v, want 275 lines from its files, band 201 for 10 points", size)
+	// main.go 40 + ui/app.js 220; main_test.go is a test, left out.
+	if size.Value != lines || size.Value != 260 || size.Min != 201 || size.Points != 10 {
+		t.Errorf("size = %+v, want 260 lines from its files, band 201 for 10 points", size)
 	}
 	for _, p := range r.Breakdown {
 		if (p.Measure == "spread" || p.Measure == "tests") && p.Value != len(p.From) {
 			t.Errorf("%s/%s value %d, want len(from) %d", p.Measure, p.Fact, p.Value, len(p.From))
 		}
 	}
-	// Degree counts the lines of the existing, non-excluded files it names.
+	// Degree counts the lines of the existing, non-excluded files it names;
+	// main_test.go is a test, left out.
 	deg := entry(t, r, "degree", "existing_lines")
-	if want := []string{"main.go", "main_test.go"}; !reflect.DeepEqual(deg.From, want) {
+	if want := []string{"main.go"}; !reflect.DeepEqual(deg.From, want) {
 		t.Errorf("degree from %v, want %v", deg.From, want)
 	}
 	existing := 0
@@ -310,8 +355,8 @@ func TestBreakdownNamesMeasureAndFacts(t *testing.T) {
 			existing += file.Added + file.Removed
 		}
 	}
-	if deg.Value != existing || deg.Value != 55 || deg.Min != 26 || deg.Points != 2 {
-		t.Errorf("degree = %+v, want 55 existing lines, band 26 for 2 points", deg)
+	if deg.Value != existing || deg.Value != 40 || deg.Min != 26 || deg.Points != 2 {
+		t.Errorf("degree = %+v, want 40 existing lines, band 26 for 2 points", deg)
 	}
 	// main_test.go is a test change, so tests scores nothing.
 	if p := entry(t, r, "tests", "untested_production_files"); p.Value != 0 || p.Points != 0 || len(p.From) != 0 {
@@ -408,10 +453,12 @@ func TestTestsMeasure(t *testing.T) {
 }
 
 // TestDegreeLeavesOutNewAndExcludedFiles pins that degree counts only lines
-// in existing files that size counts, and names exactly those files.
+// in existing files that size counts (not tests), and names exactly those
+// files.
 func TestDegreeLeavesOutNewAndExcludedFiles(t *testing.T) {
 	f := facts.Facts{Files: []facts.File{
 		{Path: "a.go", Added: 20, Removed: 10},
+		{Path: "a_test.go", Added: 50, Classes: []facts.Class{facts.ClassTest}},
 		{Path: "new.go", Added: 400, New: true},
 		{Path: "go.sum", Added: 300, Classes: []facts.Class{facts.ClassLock}},
 		{Path: "README.md", Added: 300, Classes: []facts.Class{facts.ClassDocs}},

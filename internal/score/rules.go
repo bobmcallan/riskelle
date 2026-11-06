@@ -65,9 +65,12 @@ type Rules struct {
 // real merge history (sty_62b9ea06). The highest band of every measure must
 // sum to 100 or less: size and spread take at most 50, degree 15, branch age
 // 15 (days 10, trunk commits 5), tests 10 and impact 10.
+//
+// Test files' lines are left out of size and degree, so adding or changing
+// tests never raises a score; the tests measure still sees them.
 func Default() Rules {
 	return Rules{
-		SizeExcludes: []facts.Class{facts.ClassDocs, facts.ClassGenerated, facts.ClassLock},
+		SizeExcludes: []facts.Class{facts.ClassDocs, facts.ClassGenerated, facts.ClassLock, facts.ClassTest},
 		SizeLines:    Bands{{0, 0}, {51, 5}, {201, 10}, {401, 20}, {801, 30}},
 		SpreadFiles:  Bands{{0, 0}, {6, 2}, {11, 4}, {16, 8}},
 		SpreadDirs:   Bands{{0, 0}, {3, 2}, {5, 4}, {9, 6}},
