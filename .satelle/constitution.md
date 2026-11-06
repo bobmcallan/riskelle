@@ -7,16 +7,29 @@
   anything.
 - **The goal:** the score is each developer's KPI — the share of their changes
   that are low risk. Low risk means a small, focused change with the lowest
-  impact that merges quickly. Many small stories beat one large one.
+  impact that merges quickly. Many small stories beat one large one: the score
+  drives an agile process of small, incremental changes — prove, validate,
+  then scale.
 - **One scorer, two inputs:** `score --base <ref> --head <ref>` measures the
   real diff from git; `estimate` runs the *same* scoring function over facts
   predicted from a plan. Keep the split: `collect` gathers facts, `score` is a
   pure function of facts and rules.
-- **The score is about the change only.** Six measures: size (lines added plus
-  removed, excluding generated, lock and doc files), spread (files, directories,
-  projects), degree (existing code altered), impact (dependents of what
-  changed), branch age, and tests. Where a change lands (auth, migrations,
-  infrastructure, secrets) is reported as reviewer context and never scores.
+- **Two axes: shape and consequence.** The score is mechanical, and as accurate
+  as a mechanical measure can be.
+  - *Shape* scores how the change is made, on six measures: size (lines added
+    plus removed, excluding generated, lock and doc files), spread (files,
+    directories, projects), degree (existing code altered), impact (dependents
+    of what changed), branch age, and tests.
+  - *Consequence* is what the change touches. A built-in, versioned catalog of
+    consequence classes (such as identity and rights grants) is detected
+    mechanically from the diff. Each class sets a band floor, never a discount:
+    the level is the higher of the shape level and every floor.
+  - A repo may add classes or name its production roots in `.risk/rules.json`.
+    These may only raise a floor.
+  - Splitting a change cannot lower a floor: the class lands in whichever change
+    carries it.
+  - Sensitive areas (auth, migrations, infrastructure, secrets) that no class
+    covers stay reviewer context and do not score.
 - **Invariants — never trade these away:**
   - Deterministic and on one scale for everyone. No LLM or network call in the
     scoring path; same inputs, same score.
