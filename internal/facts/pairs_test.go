@@ -125,3 +125,81 @@ func TestReadmeListsPairings(t *testing.T) {
 		}
 	}
 }
+
+func TestUnpairedLanguage(t *testing.T) {
+	for p, want := range map[string]string{
+		"scripts/a.sh":      "Shell",
+		"a.bash":            "Shell",
+		"infra/main.tf":     "Terraform",
+		"env/prod.tfvars":   "Terraform",
+		"main.go":           "",
+		"deploy.yml":        "",
+		"lib.rs":            "",
+		"t/x.bats":          "",
+		"m/main.tftest.hcl": "",
+		"Makefile":          "",
+		"":                  "",
+	} {
+		if got := UnpairedLanguage(p); got != want {
+			t.Errorf("UnpairedLanguage(%q) = %q, want %q", p, got, want)
+		}
+	}
+}
+
+func TestTestLanguages(t *testing.T) {
+	tests := []struct {
+		paths []string
+		want  []string
+	}{
+		{nil, []string{}},
+		{[]string{"scripts/deploy.sh", "main.tf"}, []string{}},
+		{[]string{"t/a.bats"}, []string{"Shell"}},
+		{[]string{"tests/smoke.sh"}, []string{"Shell"}},
+		{[]string{"m/main.tftest.hcl"}, []string{"Terraform"}},
+		{[]string{"tests/main.tf"}, []string{"Terraform"}},
+		{[]string{"m/x.tftest.json", "t/a.bats", "t/b.bats"}, []string{"Shell", "Terraform"}},
+		{[]string{"x_test.go", "tests/a.py"}, []string{}},
+	}
+	for _, tt := range tests {
+		if got := TestLanguages(tt.paths); !slices.Equal(got, tt.want) || got == nil {
+			t.Errorf("TestLanguages(%v) = %#v, want %v", tt.paths, got, tt.want)
+		}
+	}
+}
+
+// TestUnpairedTestsAreTests pins the unpaired table against the catalog:
+// every test ending is classed test, and no production extension is classed
+// test or paired by pairings.
+func TestUnpairedTestsAreTests(t *testing.T) {
+	for _, u := range unpaired {
+		for _, end := range u.tests {
+			if !slices.Contains(Classify("src/calc"+end), ClassTest) {
+				t.Errorf("%s test ending %s is not classed test", u.language, end)
+			}
+		}
+		for _, ext := range u.exts {
+			if slices.Contains(Classify("src/calc"+ext), ClassTest) {
+				t.Errorf("%s extension %s is classed test", u.language, ext)
+			}
+			if HasPairing("src/calc" + ext) {
+				t.Errorf("%s extension %s has a pairing too", u.language, ext)
+			}
+		}
+	}
+}
+
+// TestReadmeListsUnpairedLanguages pins that the README names every unpaired
+// extension and test ending as a code span.
+func TestReadmeListsUnpairedLanguages(t *testing.T) {
+	data, err := os.ReadFile("../../README.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, u := range unpaired {
+		for _, s := range append(append([]string{}, u.exts...), u.tests...) {
+			if !strings.Contains(string(data), "`"+s+"`") {
+				t.Errorf("README does not list %s `%s`", u.language, s)
+			}
+		}
+	}
+}

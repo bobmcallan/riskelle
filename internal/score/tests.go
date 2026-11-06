@@ -13,10 +13,14 @@ import (
 // production file whose extension has a pairing convention (facts.HasPairing)
 // is untested unless a changed test pairs with it: the test's subject
 // (facts.TestSubject) is the file's base name, in any directory. A production
-// file with no pairing convention is untested only when no file at all is
-// classed test. The value is the number of untested production files and From
+// file with no pairing convention is tested when any file at all is classed
+// test. Otherwise, a file in an unpaired language (facts.UnpairedLanguage:
+// Shell, Terraform) is untested only when langs, the unpaired languages with a
+// test in the head tree, holds its language: a repo with no tests in that
+// language has no way to write one. Any other file with no pairing is
+// untested. The value is the number of untested production files and From
 // lists them, sorted; with none, the value is 0 and From is empty.
-func untested(all, kept []facts.File, r Rules) Point {
+func untested(all, kept []facts.File, langs []string, r Rules) Point {
 	p := Point{Measure: MeasureTests, Fact: "untested_production_files", From: []string{}}
 	subjects, anyTest := testSubjects(all)
 	for _, file := range kept {
@@ -25,6 +29,8 @@ func untested(all, kept []facts.File, r Rules) Point {
 				continue
 			}
 		} else if anyTest {
+			continue
+		} else if lang := facts.UnpairedLanguage(file.Path); lang != "" && !contains(langs, lang) {
 			continue
 		}
 		p.From = append(p.From, file.Path)
@@ -51,4 +57,14 @@ func testSubjects(files []facts.File) (map[string]bool, bool) {
 		}
 	}
 	return subjects, anyTest
+}
+
+// contains reports whether list holds s.
+func contains(list []string, s string) bool {
+	for _, l := range list {
+		if l == s {
+			return true
+		}
+	}
+	return false
 }

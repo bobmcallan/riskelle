@@ -52,7 +52,7 @@ share of their changes that are low risk, so the score must be:
 | Degree | How much *existing* code is altered, against code in new files (tests are left out, as for size, and by default so are non-code files and run records) |
 | Impact | How many places depend on what changed (for Go, packages importing a changed package; otherwise files referencing a changed file) |
 | Branch age | Days from the branch's first commit to merge, and how far the trunk moved meanwhile |
-| Tests | Production files changed without their paired test (see [Tests and their pairs](#tests-and-their-pairs)); a file with no pairing convention counts only when no test changed at all |
+| Tests | Production files changed without their paired test (see [Tests and their pairs](#tests-and-their-pairs)); a Shell or Terraform file counts only when no test changed and the repo holds a test in its language (see [Files with no pairing](#files-with-no-pairing)); any other file with no pairing convention counts only when no test changed at all |
 
 A file is generated when its path matches a built-in or repo-added generated
 pattern, or when its header carries a marker. The header is the comment lines
@@ -135,6 +135,27 @@ with it. The rules are owned by `internal/facts/pairs.go`; for a file `x`:
   inside the file they test while its `tests/` files are named by feature.
   C/C++ headers (`.h`, `.hpp`) are not paired either.
 
+#### Files with no pairing
+
+A Shell or Terraform file cannot be paired with one test, so it is judged by
+whether the repo can test it at all. It counts as untested only when no test
+changed **and** the head tree holds at least one test in its language. In a
+repo with no tests in that language, a test cannot be asked for: splitting the
+change would be the only way down, which buys no safety.
+
+| Language | Production files | Its tests |
+| --- | --- | --- |
+| Shell | `.sh`, `.bash` | `.bats` |
+| Terraform | `.tf`, `.tfvars` | `.tftest.hcl`, `.tftest.json` |
+
+- A file the catalog classes test with the language's extension (such as
+  `tests/smoke.sh`) also counts as a test in that language.
+- Any other file with no pairing convention (config, Rust, C/C++ headers) keeps
+  the plain rule: it counts as untested when no test changed at all.
+- The facts carry the languages found as `"test_languages"`, read from the
+  head tree. A change cannot lower its own count: deleting a repo's tests is a
+  test change, and adding one only raises the count.
+
 ## Estimate, then score
 
 The same scorer runs over two sources of facts:
@@ -180,6 +201,9 @@ a JSON plan file that predicts the change:
     added lines.
 - `branch_age_days` (optional, default 0, non-negative): the expected days
   from the branch's first commit to merge.
+- Which languages have tests (see [Files with no pairing](#files-with-no-pairing))
+  is read from the target's tree plus the planned paths; the plan file has no
+  field for it.
 
 Any other field is refused. Trunk drift cannot be planned and is 0. A plan
 that is invalid or incomplete is refused with every problem named, exit code 1.

@@ -126,6 +126,7 @@ func TestCollectFactsFromAFixtureRepository(t *testing.T) {
 		`{"name":"notes/todo.md","dependents":0},` +
 		`{"name":"ui/app.js","dependents":0},` +
 		`{"name":"ui/icon.ico","dependents":0}]},` +
+		`"test_languages":[],` +
 		`"branch_age_days":0,"trunk_commits":1}`
 	if string(gotJSON) != want {
 		t.Errorf("facts JSON =\n%s\nwant\n%s", gotJSON, want)

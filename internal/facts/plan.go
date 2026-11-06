@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"path"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -116,7 +117,8 @@ func cleanRelative(p string) bool {
 // Predict turns a plan into the facts Collect would gather for the change,
 // with the same helpers, reading only the target commit: its tree says which
 // planned paths are new and holds the project manifests, and impact is counted
-// there. Base is the target, so rules are read there as for a real diff. A
+// there. The languages with tests are read from that tree plus the planned
+// paths, as the score will read them at head. Base is the target, so rules are read there as for a real diff. A
 // plan has no commits of its own: MergeBase and Head are empty and
 // TrunkCommits is 0, as trunk drift cannot be planned.
 func Predict(ctx context.Context, repo string, p Plan) (Facts, error) {
@@ -155,6 +157,7 @@ func Predict(ctx context.Context, repo string, p Plan) (Facts, error) {
 	return Facts{
 		Base: target, Files: files,
 		Directories: Directories(planned), Projects: Projects(planned, sorted(roots)),
-		Degree: DegreeOf(files), Impact: impact, BranchAgeDays: p.BranchAgeDays,
+		Degree: DegreeOf(files), Impact: impact,
+		TestLanguages: TestLanguages(slices.Concat(tree, planned)), BranchAgeDays: p.BranchAgeDays,
 	}, nil
 }

@@ -90,6 +90,7 @@ func TestPredict(t *testing.T) {
 				{"svc/Program.cs", 0}, {"web/src/new.test.js", 0},
 			},
 		},
+		TestLanguages: []string{},
 		BranchAgeDays: 3,
 	}
 	// The order files are listed in cannot change the facts.
@@ -103,6 +104,12 @@ func TestPredict(t *testing.T) {
 		if !reflect.DeepEqual(got, want) {
 			t.Errorf("Predict(%v) =\n%+v\nwant\n%+v", p.Files, got, want)
 		}
+	}
+
+	// A planned shell test counts, as it will at head.
+	withTest := Plan{Target: "main", Files: []PlannedFile{{Path: "ops/run.sh", Added: 4}, {Path: "t/run.bats", Added: 3}}}
+	if got, err := Predict(ctx, f.dir, withTest); err != nil || !reflect.DeepEqual(got.TestLanguages, []string{"Shell"}) {
+		t.Errorf("Predict(planned .bats) TestLanguages = %v, %v; want [Shell]", got.TestLanguages, err)
 	}
 
 	if _, err := Predict(ctx, f.dir, Plan{Target: "nope", Files: plan.Files}); err == nil || !strings.Contains(err.Error(), `"nope"`) {

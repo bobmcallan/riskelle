@@ -155,6 +155,7 @@ func TestCollect(t *testing.T) {
 			},
 		},
 
+		TestLanguages: []string{},
 		BranchAgeDays: 0, // every fixture commit is dated 2026-01-01
 		TrunkCommits:  1, // the "trunk" commit on main after the branch point
 	}
@@ -308,5 +309,32 @@ func TestRunGitStartsNoBackgroundGit(t *testing.T) {
 		if strings.Contains(line, `"event":"child_start"`) {
 			t.Errorf("git commit in the fixture started a child process: %s", line)
 		}
+	}
+}
+
+// TestCollectTestLanguages pins that the languages with tests are read from
+// the head tree, not the base: the branch deletes the repo's only .bats file.
+func TestCollectTestLanguages(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	dir := t.TempDir()
+	runGit(t, dir, "init", "--quiet", "--initial-branch=main")
+	write(t, dir, "t/smoke.bats", "@test x { true; }\n")
+	write(t, dir, "infra/main.tftest.hcl", "run \"x\" {}\n")
+	write(t, dir, "run.sh", "echo one\n")
+	runGit(t, dir, "add", ".")
+	runGit(t, dir, "commit", "--quiet", "-m", "base")
+	runGit(t, dir, "switch", "--quiet", "-c", "feature")
+	runGit(t, dir, "rm", "--quiet", "t/smoke.bats")
+	write(t, dir, "run.sh", "echo two\n")
+	runGit(t, dir, "commit", "--quiet", "-am", "feature")
+
+	got, err := Collect(context.Background(), dir, "main", "feature")
+	if err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+	if want := []string{"Terraform"}; !reflect.DeepEqual(got.TestLanguages, want) {
+		t.Errorf("TestLanguages = %v, want %v", got.TestLanguages, want)
 	}
 }

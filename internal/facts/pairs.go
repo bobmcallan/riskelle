@@ -2,6 +2,7 @@ package facts
 
 import (
 	"path"
+	"slices"
 	"strings"
 )
 
@@ -23,7 +24,8 @@ type pairing struct {
 // ordered: within a language the longer marker comes first, so the first
 // match is the most specific. Terraform, Shell and Rust have no rule: a
 // Terraform test exercises a module directory, a .bats file has no fixed
-// subject, and Rust unit tests sit inside the file they test.
+// subject, and Rust unit tests sit inside the file they test. Terraform and
+// Shell are in unpaired instead.
 var pairings = []pairing{
 	{language: "Go", exts: []string{".go"}, suffix: "_test"},
 	{language: "Python", exts: []string{".py"}, prefix: "test_"},
@@ -78,6 +80,70 @@ func TestSubject(p string) string {
 		}
 	}
 	return base
+}
+
+// unpaired is the table of languages whose tests riskelle can see but cannot
+// pair with one file (see pairings): a production file in one of them counts
+// as untested only when the repo holds a test in its language. Every test
+// ending builds a name builtin classes as test, and no extension here is one
+// pairings pairs.
+var unpaired = []struct {
+	language string   // the README row label
+	exts     []string // production extensions
+	tests    []string // test file name endings
+}{
+	{"Shell", []string{".sh", ".bash"}, []string{".bats"}},
+	{"Terraform", []string{".tf", ".tfvars"}, []string{".tftest.hcl", ".tftest.json"}},
+}
+
+// UnpairedLanguage returns the unpaired language a production path is
+// written in, from its extension alone, or "" when it is in none.
+func UnpairedLanguage(p string) string {
+	ext := path.Ext(path.Base(p))
+	if ext == "" {
+		return ""
+	}
+	for _, u := range unpaired {
+		for _, e := range u.exts {
+			if e == ext {
+				return u.language
+			}
+		}
+	}
+	return ""
+}
+
+// TestLanguages returns the unpaired languages that have at least one test
+// file among paths, sorted, distinct and non-nil. A path is a test of a
+// language when Classify classes it test and its base name ends in one of the
+// language's test endings or production extensions, so tests/smoke.sh counts
+// for Shell. It reads only the paths, so it serves a head tree and a plan.
+func TestLanguages(paths []string) []string {
+	set := map[string]bool{}
+	for _, p := range paths {
+		base := path.Base(p)
+		for _, u := range unpaired {
+			if set[u.language] || !endsInAny(base, u.tests, u.exts) {
+				continue
+			}
+			if slices.Contains(Classify(p), ClassTest) {
+				set[u.language] = true
+			}
+		}
+	}
+	return sorted(set)
+}
+
+// endsInAny reports whether s ends in any of the endings of any list.
+func endsInAny(s string, lists ...[]string) bool {
+	for _, l := range lists {
+		for _, e := range l {
+			if strings.HasSuffix(s, e) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // HasPairing reports whether a path's extension is a production extension

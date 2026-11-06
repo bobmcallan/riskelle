@@ -90,7 +90,7 @@ func Score(f facts.Facts, r Rules) Result {
 	kept, _ := counted(f.Files, r)
 	breakdown = append(breakdown, degree(kept, r))
 	breakdown = append(breakdown, branchAge(f, r)...)
-	breakdown = append(breakdown, untested(f.Files, kept, r))
+	breakdown = append(breakdown, untested(f.Files, kept, f.TestLanguages, r))
 	breakdown = append(breakdown, impact(f, r))
 
 	total := 0

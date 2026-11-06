@@ -59,6 +59,7 @@ func Collect(ctx context.Context, repo, base, head string) (Facts, error) {
 
 	roots := map[string]bool{}
 	atBase := map[string]bool{}
+	testLangs := []string{}
 	for _, commit := range []string{mergeBase, headSHA} {
 		paths, err := treePaths(ctx, repo, commit)
 		if err != nil {
@@ -71,6 +72,8 @@ func Collect(ctx context.Context, repo, base, head string) (Facts, error) {
 			for _, p := range paths {
 				atBase[p] = true
 			}
+		} else {
+			testLangs = TestLanguages(paths)
 		}
 	}
 	markNew(files, atBase)
@@ -100,6 +103,7 @@ func Collect(ctx context.Context, repo, base, head string) (Facts, error) {
 		Degree:      DegreeOf(files),
 		Impact:      impact,
 
+		TestLanguages: testLangs,
 		BranchAgeDays: age,
 		TrunkCommits:  drift,
 	}, nil

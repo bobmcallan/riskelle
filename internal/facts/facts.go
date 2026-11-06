@@ -32,6 +32,10 @@ type Facts struct {
 	Degree      Degree   `json:"degree"` // lines in files that existed at the merge base against lines in new files
 	Impact      Impact   `json:"impact"`
 
+	// The unpaired languages (Shell, Terraform) with a test file in the head
+	// tree, sorted; the tests measure counts their files only when present.
+	TestLanguages []string `json:"test_languages"`
+
 	// Commit history, never the clock.
 	BranchAgeDays int `json:"branch_age_days"` // whole days from the branch's first commit to head; 0 with no commits of its own
 	TrunkCommits  int `json:"trunk_commits"`   // commits on base since the merge base
