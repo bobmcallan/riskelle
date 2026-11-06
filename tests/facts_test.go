@@ -16,7 +16,10 @@ import (
 
 // fixtureGit runs git in dir with the developer's global and system config
 // shut out and fixed identities and dates, so the fixture is the same on
-// every machine. It also passes quietGitConfig, since git commit otherwise
+// every machine. GIT_CONFIG_GLOBAL does not shut out the default
+// $XDG_CONFIG_HOME/git/ignore, so core.excludesFile is pointed at the null
+// device: a developer who ignores .claude/ or CLAUDE.md there would otherwise
+// lose fixture files. It also passes quietGitConfig, since git commit otherwise
 // leaves a detached maintenance run writing under .git while t.TempDir
 // removes the fixture.
 func fixtureGit(t *testing.T, dir string, args ...string) string {
@@ -27,7 +30,7 @@ func fixtureGit(t *testing.T, dir string, args ...string) string {
 // fixtureGitAt is fixtureGit with the given author and committer dates.
 func fixtureGitAt(t *testing.T, dir, authorDate, committerDate string, args ...string) string {
 	t.Helper()
-	argv := []string{"-C", dir, "-c", "commit.gpgsign=false"}
+	argv := []string{"-C", dir, "-c", "commit.gpgsign=false", "-c", "core.excludesFile=" + os.DevNull}
 	for _, kv := range quietGitConfig {
 		argv = append(argv, "-c", kv[0]+"="+kv[1])
 	}

@@ -54,6 +54,10 @@ func TestCollectClassifiesChangedPaths(t *testing.T) {
 		"config/app.toml":        {"non_code"},
 		"data/rates.csv":         {"non_code"},
 		"pkg/testdata/rates.csv": {"non_code", "test"},
+		// agent and harness config
+		".claude/settings.json":           {"non_code"},
+		".satelle/workflows/story.json":   {"non_code"},
+		".github/copilot-instructions.md": {"docs", "non_code"},
 		// run records
 		"logs/run.log":      {"run_record"},
 		"infra/main.tfplan": {"run_record"},

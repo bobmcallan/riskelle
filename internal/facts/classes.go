@@ -8,7 +8,8 @@ import (
 // Class is a kind of changed path that the scorer treats specially: size
 // leaves out docs, generated and lock files, and the tests measure looks for
 // test files. Non-code files configure the repo or hold plain data rather
-// than implement; no measure leaves them out by default yet, the rules toggle
+// than implement, as do agent and harness config (.satelle/, .claude/ and the
+// like); no measure leaves them out by default yet, the rules toggle
 // does that. Run records are what records a change rather than makes it:
 // logs, plan output and state snapshots.
 type Class string
@@ -75,6 +76,20 @@ var builtin = []struct {
 		"**/.env.example",
 		// plain data
 		"**/*.csv",
+		// agent and harness config: satelle, Claude Code, pi, Grok, Cursor,
+		// Codex, Gemini CLI, Windsurf, Cline, Roo Code, Kiro, JetBrains Junie
+		"**/.satelle/**", "**/.claude/**", "**/.pi/**", "**/.grok/**", "**/.cursor/**",
+		"**/.codex/**", "**/.gemini/**", "**/.windsurf/**", "**/.clinerules/**",
+		"**/.roo/**", "**/.kiro/**", "**/.junie/**",
+		// GitHub Copilot; .github/workflows/** stays code
+		"**/.github/copilot-instructions.md",
+		"**/.github/instructions/**", "**/.github/prompts/**", "**/.github/chatmodes/**",
+		// agent instruction files
+		"**/CLAUDE.md", "**/AGENTS.md", "**/GEMINI.md",
+		// legacy single-file rules
+		"**/.cursorrules", "**/.windsurfrules", "**/.clinerules",
+		// MCP server config and aider
+		"**/.mcp.json", "**/.aider.conf.yml",
 	}},
 	{ClassRunRecord, []string{
 		// logs

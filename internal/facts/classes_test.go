@@ -208,6 +208,62 @@ func TestClassifyNonCode(t *testing.T) {
 	}
 }
 
+// TestClassifyAgentConfig covers each approved agent and harness config
+// pattern, which the non-code class holds, and the near misses that must stay
+// out of it. Markdown under them is docs as well.
+func TestClassifyAgentConfig(t *testing.T) {
+	nonCode := []Class{ClassNonCode}
+	docsNonCode := []Class{ClassDocs, ClassNonCode}
+	tests := []struct {
+		path string
+		want []Class
+	}{
+		// directories
+		{".satelle/satelle.toml", nonCode},
+		{".satelle/workflows/story.toml", nonCode},
+		{".satelle/skills/coder.md", docsNonCode},
+		{".satelle/hooks/gate.sh", nonCode},
+		{".claude/settings.json", nonCode},
+		{"svc/.claude/settings.json", nonCode},
+		{".pi/config.json", nonCode},
+		{".grok/settings.json", nonCode},
+		{".cursor/rules/go.mdc", nonCode},
+		{".codex/config.json", nonCode},
+		{".gemini/settings.json", nonCode},
+		{".windsurf/rules/a.md", docsNonCode},
+		{".clinerules/a.md", docsNonCode},
+		{".roo/rules/a.txt", nonCode},
+		{".kiro/steering/x.md", docsNonCode},
+		{".junie/guidelines.md", docsNonCode},
+		{".github/instructions/go.instructions.md", docsNonCode},
+		{".github/prompts/p.prompt.md", docsNonCode},
+		{".github/chatmodes/c.chatmode.md", docsNonCode},
+		// files
+		{".github/copilot-instructions.md", docsNonCode},
+		{"CLAUDE.md", docsNonCode},
+		{"svc/CLAUDE.md", docsNonCode},
+		{"AGENTS.md", docsNonCode},
+		{"GEMINI.md", docsNonCode},
+		{".cursorrules", nonCode},
+		{".windsurfrules", nonCode},
+		{".clinerules", nonCode},
+		{".mcp.json", nonCode},
+		{".aider.conf.yml", nonCode},
+		// left out
+		{".github/workflows/ci.yml", nil},
+		{".github/CODEOWNERS", nil},
+		{"satelle/main.go", nil},
+		{"cmd/pi/main.go", nil},
+		{"claude.go", nil},
+		{".claudeignore", nil},
+	}
+	for _, tt := range tests {
+		if got := Classify(tt.path); !reflect.DeepEqual(got, tt.want) {
+			t.Errorf("Classify(%q) = %v, want %v", tt.path, got, tt.want)
+		}
+	}
+}
+
 func TestClassifyMultipleClasses(t *testing.T) {
 	tests := []struct {
 		path string
