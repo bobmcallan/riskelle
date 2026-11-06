@@ -31,20 +31,6 @@ func TestUnpairedLanguageNeedsTestsInTheRepo(t *testing.T) {
 		}
 		return base
 	}
-	untested := func(t *testing.T, out string) score.Point {
-		t.Helper()
-		var got report.Report
-		if err := json.Unmarshal([]byte(out), &got); err != nil {
-			t.Fatalf("report: %v\n%s", err, out)
-		}
-		for _, p := range got.Breakdown {
-			if p.Measure == score.MeasureTests && p.Fact == "untested_production_files" {
-				return p
-			}
-		}
-		t.Fatalf("no untested_production_files in %s", out)
-		return score.Point{}
-	}
 	entry := func(t *testing.T, out, measure, fact string) score.Point {
 		t.Helper()
 		var got report.Report
@@ -66,7 +52,7 @@ func TestUnpairedLanguageNeedsTestsInTheRepo(t *testing.T) {
 		if code != 0 {
 			t.Fatalf("score exit %d: %s", code, stderr)
 		}
-		if p := untested(t, out); p.Value != 0 || p.Points != 0 || len(p.From) != 0 {
+		if p := untestedPoint(t, out); p.Value != 0 || p.Points != 0 || len(p.From) != 0 {
 			t.Errorf("untested = %+v, want 0", p)
 		}
 		if p := entry(t, out, score.MeasureSize, "lines"); p.Value != 213 {
@@ -83,7 +69,7 @@ func TestUnpairedLanguageNeedsTestsInTheRepo(t *testing.T) {
 		if code != 0 {
 			t.Fatalf("estimate exit %d: %s", code, stderr)
 		}
-		if p := untested(t, out); p.Value != 0 {
+		if p := untestedPoint(t, out); p.Value != 0 {
 			t.Errorf("estimate untested = %+v, want 0", p)
 		}
 	})
@@ -108,8 +94,89 @@ func TestUnpairedLanguageNeedsTestsInTheRepo(t *testing.T) {
 			if code != 0 {
 				t.Fatalf("score exit %d: %s", code, stderr)
 			}
-			if p := untested(t, out); p.Value != tt.wantValue || !reflect.DeepEqual(p.From, tt.wantFrom) {
+			if p := untestedPoint(t, out); p.Value != tt.wantValue || !reflect.DeepEqual(p.From, tt.wantFrom) {
 				t.Errorf("untested = %+v, want %d from %v", p, tt.wantValue, tt.wantFrom)
+			}
+		})
+	}
+}
+
+// untestedPoint returns the tests measure's breakdown entry from a JSON report.
+func untestedPoint(t *testing.T, out string) score.Point {
+	t.Helper()
+	var got report.Report
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("report: %v\n%s", err, out)
+	}
+	for _, p := range got.Breakdown {
+		if p.Measure == score.MeasureTests && p.Fact == "untested_production_files" {
+			return p
+		}
+	}
+	t.Fatalf("no untested_production_files in %s", out)
+	return score.Point{}
+}
+
+// TestShellScriptTestConvention drives the built binary over a change modelled
+// on a real one: an extensionless script and its extensionless -test script
+// changed together score no untested file, from score and estimate; a script
+// changed alone, in a repo with script tests, counts; a Makefile keeps the
+// plain rule.
+func TestShellScriptTestConvention(t *testing.T) {
+	bin := buildRiskelle(t, t.TempDir())
+	score := func(t *testing.T, dir string) string {
+		t.Helper()
+		code, out, stderr := runScore(t, bin, dir, "--base", "main", "--head", "topic")
+		if code != 0 {
+			t.Fatalf("score exit %d: %s", code, stderr)
+		}
+		return out
+	}
+
+	t.Run("script with its test", func(t *testing.T) {
+		dir := rulesFixture(t,
+			map[string]string{"README.md": "# fixture\n", "scripts/isolation-test": "#!/bin/bash\ntrue\n"},
+			map[string]string{"scripts/plan-guard": numbered("# ", 60), "scripts/plan-guard-test": numbered("# ", 40)})
+		out := score(t, dir)
+		if p := untestedPoint(t, out); p.Value != 0 || len(p.From) != 0 {
+			t.Errorf("untested = %+v, want 0", p)
+		}
+		var got report.Report
+		json.Unmarshal([]byte(out), &got)
+		for _, p := range got.Breakdown {
+			if p.Fact == "lines" && p.Value != 60 {
+				t.Errorf("size = %d, want 60: the test's lines are not production", p.Value)
+			}
+		}
+		plan := filepath.Join(t.TempDir(), "plan.json")
+		os.WriteFile(plan, []byte(`{"target":"main","files":[`+
+			`{"path":"scripts/plan-guard","added":60},{"path":"scripts/plan-guard-test","added":40}]}`), 0o644)
+		code, eout, stderr := runEstimate(t, bin, dir, plan)
+		if code != 0 {
+			t.Fatalf("estimate exit %d: %s", code, stderr)
+		}
+		if p := untestedPoint(t, eout); p.Value != 0 {
+			t.Errorf("estimate untested = %+v, want 0", p)
+		}
+	})
+
+	for _, tt := range []struct {
+		name  string
+		base  map[string]string
+		topic map[string]string
+		want  []string
+	}{
+		{"script alone, script tests in repo", map[string]string{"scripts/plan-guard-test": "true\n", "scripts/plan-guard": "a\n"},
+			map[string]string{"scripts/plan-guard": "b\n"}, []string{"scripts/plan-guard"}},
+		{".sh alone, extensionless script tests in repo", map[string]string{"scripts/plan-guard-test": "true\n"},
+			map[string]string{"scripts/run.sh": "echo\n"}, []string{"scripts/run.sh"}},
+		{"Makefile alone", map[string]string{"README.md": "# fixture\n"},
+			map[string]string{"Makefile": "all:\n"}, []string{"Makefile"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			p := untestedPoint(t, score(t, rulesFixture(t, tt.base, tt.topic)))
+			if !reflect.DeepEqual(p.From, tt.want) {
+				t.Errorf("untested from %v, want %v", p.From, tt.want)
 			}
 		})
 	}

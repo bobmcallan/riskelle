@@ -52,3 +52,39 @@ func TestUntestedUnpairedLanguages(t *testing.T) {
 		})
 	}
 }
+
+// TestUntestedShellScriptTests scores script changes with classes taken from
+// facts.Classify, so classification and scoring are proved together.
+func TestUntestedShellScriptTests(t *testing.T) {
+	file := func(p string, added int) facts.File {
+		return facts.File{Path: p, Added: added, Classes: facts.Classify(p)}
+	}
+	tests := []struct {
+		name      string
+		files     []facts.File
+		langs     []string
+		wantValue int
+		wantFrom  []string
+	}{
+		{"script with its test", []facts.File{file("scripts/plan-guard", 50), file("scripts/plan-guard-test", 30)}, []string{"Shell"}, 0, []string{}},
+		{"script with its test, no langs", []facts.File{file("scripts/plan-guard", 50), file("scripts/plan-guard-test", 30)}, []string{}, 0, []string{}},
+		{"extensionless script alone", []facts.File{file("scripts/plan-guard", 50)}, []string{"Shell"}, 1, []string{"scripts/plan-guard"}},
+		{".sh script alone", []facts.File{file("scripts/run.sh", 50)}, []string{"Shell"}, 1, []string{"scripts/run.sh"}},
+		{"Makefile alone", []facts.File{file("Makefile", 5)}, []string{}, 1, []string{"Makefile"}},
+		{"Dockerfile alone", []facts.File{file("Dockerfile", 5)}, []string{"Shell"}, 1, []string{"Dockerfile"}},
+		{"Makefile with a script test", []facts.File{file("Makefile", 5), file("scripts/plan-guard-test", 3)}, []string{"Shell"}, 0, []string{}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			res := Score(facts.Facts{Files: tt.files, TestLanguages: tt.langs}, Default())
+			p := entry(t, res, "tests", "untested_production_files")
+			if p.Value != tt.wantValue || !reflect.DeepEqual(p.From, tt.wantFrom) {
+				t.Errorf("tests = %+v, want %d from %v", p, tt.wantValue, tt.wantFrom)
+			}
+		})
+	}
+	res := Score(facts.Facts{Files: tests[0].files}, Default())
+	if size := entry(t, res, "size", "lines"); size.Value != 50 {
+		t.Errorf("size = %d, want 50: the script test's lines are not production", size.Value)
+	}
+}

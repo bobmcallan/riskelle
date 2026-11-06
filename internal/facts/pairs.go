@@ -25,7 +25,8 @@ type pairing struct {
 // match is the most specific. Terraform, Shell and Rust have no rule: a
 // Terraform test exercises a module directory, a .bats file has no fixed
 // subject, and Rust unit tests sit inside the file they test. Terraform and
-// Shell are in unpaired instead.
+// Shell are in unpaired instead; a shell script test named by scriptTests
+// names its script (TestSubject), though scripts still score as unpaired.
 var pairings = []pairing{
 	{language: "Go", exts: []string{".go"}, suffix: "_test"},
 	{language: "Python", exts: []string{".py"}, prefix: "test_"},
@@ -79,6 +80,9 @@ func TestSubject(p string) string {
 			}
 		}
 	}
+	if subject, ok := scriptTestSubject(base); ok {
+		return subject
+	}
 	return base
 }
 
@@ -92,8 +96,45 @@ var unpaired = []struct {
 	exts     []string // production extensions
 	tests    []string // test file name endings
 }{
-	{"Shell", []string{".sh", ".bash"}, []string{".bats"}},
+	{scriptLanguage, []string{".sh", ".bash"}, []string{".bats"}},
 	{"Terraform", []string{".tf", ".tfvars"}, []string{".tftest.hcl", ".tftest.json"}},
+}
+
+// scriptLanguage is the unpaired language of shell scripts and their tests.
+const scriptLanguage = "Shell"
+
+// scriptTests are the shell script test names, in order, first match wins: a
+// test of the script stem is named prefix + stem + suffix + ext, for an ext in
+// scriptExts, and tests stem + ext.
+var scriptTests = []struct{ prefix, suffix string }{
+	{suffix: "-test"}, {suffix: "_test"}, {prefix: "test-"},
+}
+
+// scriptExts are the extensions a script and its test share; "" is none, a
+// base name with no dot.
+var scriptExts = []string{"", ".sh", ".bash"}
+
+// scriptTestSubject returns the script a shell script test's base name tests,
+// in the same convention (no extension with none, .sh with .sh), and whether
+// the name is a script test at all. An empty stem is not one.
+func scriptTestSubject(base string) (string, bool) {
+	ext := path.Ext(base)
+	if !slices.Contains(scriptExts, ext) {
+		return "", false
+	}
+	name := strings.TrimSuffix(base, ext)
+	for _, m := range scriptTests {
+		if len(name) > len(m.prefix)+len(m.suffix) && strings.HasPrefix(name, m.prefix) && strings.HasSuffix(name, m.suffix) {
+			return name[len(m.prefix):len(name)-len(m.suffix)] + ext, true
+		}
+	}
+	return "", false
+}
+
+// isScriptTest reports whether a base name is a shell script test name.
+func isScriptTest(base string) bool {
+	_, ok := scriptTestSubject(base)
+	return ok
 }
 
 // UnpairedLanguage returns the unpaired language a production path is
@@ -123,7 +164,7 @@ func TestLanguages(paths []string) []string {
 	for _, p := range paths {
 		base := path.Base(p)
 		for _, u := range unpaired {
-			if set[u.language] || !endsInAny(base, u.tests, u.exts) {
+			if set[u.language] || !(endsInAny(base, u.tests, u.exts) || u.language == scriptLanguage && isScriptTest(base)) {
 				continue
 			}
 			if slices.Contains(Classify(p), ClassTest) {

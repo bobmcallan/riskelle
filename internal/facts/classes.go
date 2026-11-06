@@ -1,6 +1,7 @@
 package facts
 
 import (
+	"path"
 	"regexp"
 	"strings"
 )
@@ -138,6 +139,9 @@ var builtin = []struct {
 		"**/*.tftest.hcl", "**/*.tftest.json",
 		// Shell
 		"**/*.bats",
+		// and the script test names in pairs.go's scriptTests (x-test, x_test,
+		// test-x, with no extension or .sh/.bash): a glob cannot say "no
+		// extension", and **/test-* would class test-utils.ts too.
 		// Rust needs no pattern of its own: its integration tests are tests/**,
 		// which "**/tests/**" covers, and its unit tests sit inside source files
 		// (#[cfg(test)]), which a path cannot show.
@@ -176,6 +180,10 @@ func Classify(p string) []Class {
 				break
 			}
 		}
+	}
+	// ClassTest is last in Class order, so appending keeps the order.
+	if (len(classes) == 0 || classes[len(classes)-1] != ClassTest) && isScriptTest(path.Base(p)) {
+		classes = append(classes, ClassTest)
 	}
 	return classes
 }

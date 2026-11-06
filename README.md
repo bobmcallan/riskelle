@@ -116,12 +116,16 @@ repo-relative path, and `**/` matches any directories.
 | Elixir | `**/*_test.exs` |
 | Dart | `**/*_test.dart` |
 | Terraform | `**/*.tftest.hcl`, `**/*.tftest.json` |
-| Shell | `**/*.bats` |
+| Shell | `**/*.bats`; script tests named `x-test`, `x_test` or `test-x`, with no extension or `.sh`/`.bash` (such as `scripts/plan-guard-test`, `run-test.sh`) |
 | Any ecosystem | `**/test/**`, `**/tests/**` |
 
 - In-file unit tests (Rust `#[cfg(test)]`, Python doctests) cannot be seen from
   a path.
 - Any directory named `spec/` or `test/` is classed test whatever the language.
+- Shell script test names are matched in `internal/facts/pairs.go`, not by a
+  glob: a glob cannot say "no extension", and `**/test-*` would class
+  `src/test-utils.ts` as a test too. An extensionless name has no dot, so
+  `v1.2-test` is not one.
 
 ### Tests and their pairs
 
@@ -143,6 +147,7 @@ with it. The rules are owned by `internal/facts/pairs.go`; for a file `x`:
 | Scala | `.scala` | `xSpec.scala`, `xSuite.scala`, `xTest.scala` |
 | Elixir | `.ex` | `x_test.exs` |
 | Dart | `.dart` | `x_test.dart` |
+| Shell | `.sh`, `.bash`, no extension | `x-test`, `x_test`, `test-x` (same extension as the script, or none) |
 
 - Directories are ignored, so a test in another directory still pairs; two
   files with the same name in different directories are both paired by one test.
@@ -154,10 +159,13 @@ with it. The rules are owned by `internal/facts/pairs.go`; for a file `x`:
 - A test file with no naming marker (`__tests__/a.js`, `tests/api.rs`, a file
   in a `*.Tests` project, a fixture under `testdata/`) pairs with the file of
   its own name.
-- Terraform, Shell and Rust have no file pairing: a Terraform test exercises a
-  module directory, a `.bats` file has no fixed subject, and Rust unit tests sit
-  inside the file they test while its `tests/` files are named by feature.
+- Terraform and Rust have no file pairing: a Terraform test exercises a module
+  directory, and Rust unit tests sit inside the file they test while its
+  `tests/` files are named by feature. A `.bats` file has no fixed subject.
   C/C++ headers (`.h`, `.hpp`) are not paired either.
+- A Shell script test names its script (`scripts/plan-guard-test` tests
+  `scripts/plan-guard`), but scripts are still scored by the no-pairing rule
+  below: any changed test, a script test included, covers them.
 
 #### Files with no pairing
 
@@ -174,8 +182,13 @@ change would be the only way down, which buys no safety.
 
 - A file the catalog classes test with the language's extension (such as
   `tests/smoke.sh`) also counts as a test in that language.
+- A Shell script test (`x-test`, `x_test`, `test-x`), extensionless included,
+  counts as a Shell test, so a repo of extensionless scripts with their tests
+  holds Shell tests.
 - Any other file with no pairing convention (config, Rust, C/C++ headers) keeps
-  the plain rule: it counts as untested when no test changed at all.
+  the plain rule: it counts as untested when no test changed at all. An
+  extensionless file (a script, a `Makefile`, a `Dockerfile`) names no language,
+  so it keeps the plain rule too.
 - The facts carry the languages found as `"test_languages"`, read from the
   head tree. A change cannot lower its own count: deleting a repo's tests is a
   test change, and adding one only raises the count.

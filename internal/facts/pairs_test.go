@@ -203,3 +203,62 @@ func TestReadmeListsUnpairedLanguages(t *testing.T) {
 		}
 	}
 }
+
+// TestScriptTestNamesAreTests pins every script test name: classed test,
+// naming its script in the same convention, and the script itself a Shell
+// production file with no pairing.
+func TestScriptTestNamesAreTests(t *testing.T) {
+	for _, m := range scriptTests {
+		for _, ext := range scriptExts {
+			name := "src/" + m.prefix + "calc" + m.suffix + ext
+			if !slices.Contains(Classify(name), ClassTest) {
+				t.Errorf("%s is not classed test", name)
+			}
+			subject := TestSubject(name)
+			if subject != "calc"+ext {
+				t.Errorf("TestSubject(%s) = %q, want %q", name, subject, "calc"+ext)
+			}
+			if slices.Contains(Classify("src/"+subject), ClassTest) || HasPairing("src/"+subject) {
+				t.Errorf("subject %s is classed test or has a pairing", subject)
+			}
+			if ext != "" && UnpairedLanguage(subject) != "Shell" {
+				t.Errorf("subject %s is not Shell", subject)
+			}
+		}
+	}
+}
+
+func TestScriptTestLanguages(t *testing.T) {
+	for _, tt := range []struct {
+		paths []string
+		want  []string
+	}{
+		{[]string{"scripts/plan-guard-test"}, []string{"Shell"}},
+		{[]string{"scripts/test-x"}, []string{"Shell"}},
+		{[]string{"scripts/x_test.bash"}, []string{"Shell"}},
+		{[]string{"scripts/plan-guard", "Makefile"}, []string{}},
+	} {
+		if got := TestLanguages(tt.paths); !slices.Equal(got, tt.want) {
+			t.Errorf("TestLanguages(%v) = %v, want %v", tt.paths, got, tt.want)
+		}
+	}
+	for _, p := range []string{"scripts/plan-guard", "Dockerfile"} {
+		if got := UnpairedLanguage(p); got != "" {
+			t.Errorf("UnpairedLanguage(%q) = %q, want none", p, got)
+		}
+	}
+}
+
+// TestReadmeListsScriptTests pins that the README names each script test
+// marker's example name as a code span.
+func TestReadmeListsScriptTests(t *testing.T) {
+	data, err := os.ReadFile("../../README.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range scriptTests {
+		if name := m.prefix + "x" + m.suffix; !strings.Contains(string(data), "`"+name+"`") {
+			t.Errorf("README does not list script test name `%s`", name)
+		}
+	}
+}

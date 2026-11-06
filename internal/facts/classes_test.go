@@ -420,3 +420,30 @@ func TestReadmeListsRunRecords(t *testing.T) {
 		}
 	}
 }
+
+func TestClassifyScriptTests(t *testing.T) {
+	for p, want := range map[string][]Class{
+		"scripts/plan-guard-test": {ClassTest},
+		"scripts/plan-guard_test": {ClassTest},
+		"scripts/test-plan-guard": {ClassTest},
+		"scripts/run-test.sh":     {ClassTest},
+		"scripts/run_test.bash":   {ClassTest},
+		"bin/test-run.sh":         {ClassTest},
+		"scripts/isolation-test":  {ClassTest},
+		"scripts/plan-guard":      nil,
+		"scripts/run.sh":          nil,
+		"Makefile":                nil,
+		"Dockerfile":              nil,
+		"src/test-utils.ts":       nil,
+		"config/test-data.json":   nil,
+		"scripts/v1.2-test":       nil,
+		"scripts/-test":           nil,
+		"scripts/test-":           nil,
+		"LICENSE":                 {ClassDocs},
+		"tests/run-test.sh":       {ClassTest},
+	} {
+		if got := Classify(p); !reflect.DeepEqual(got, want) {
+			t.Errorf("Classify(%q) = %v, want %v", p, got, want)
+		}
+	}
+}
