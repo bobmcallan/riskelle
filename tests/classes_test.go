@@ -5,6 +5,8 @@ package tests
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"strings"
 	"testing"
 
 	"github.com/bobmcallan/riskelle/internal/facts"
@@ -42,6 +44,8 @@ func TestCollectClassifiesChangedPaths(t *testing.T) {
 		// Python
 		"flow/test_steps.py": {"test"},
 		"flow/steps.py":      nil,
+		// Terraform
+		"infra/prod/.terraform.lock.hcl": {"lock"},
 		// docs
 		"README.md":      {"docs"},
 		"docs/setup.txt": {"docs"},
@@ -89,6 +93,31 @@ func TestCollectClassifiesChangedPaths(t *testing.T) {
 		wantJSON, _ := json.Marshal(want)
 		if string(raw) != string(wantJSON) {
 			t.Errorf("%s: classes = %s, want %s", p, raw, wantJSON)
+		}
+	}
+}
+
+// TestREADMESizeRowNamesLockFiles checks that the README's size row names the
+// lock files the lock class leaves out of size, one per ecosystem, so the
+// documented measure matches the classes Collect assigns.
+func TestREADMESizeRowNamesLockFiles(t *testing.T) {
+	readme, err := os.ReadFile("../README.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var row string
+	for _, line := range strings.Split(string(readme), "\n") {
+		if strings.HasPrefix(line, "| Size |") {
+			row = line
+			break
+		}
+	}
+	if row == "" {
+		t.Fatal("README.md has no Size row in its measures table")
+	}
+	for _, name := range []string{"go.sum", "package-lock.json", "packages.lock.json", "*.lock", ".terraform.lock.hcl"} {
+		if !strings.Contains(row, "`"+name+"`") {
+			t.Errorf("README size row does not name `%s`: %s", name, row)
 		}
 	}
 }

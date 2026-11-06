@@ -56,6 +56,8 @@ var builtin = []struct {
 		"**/package-lock.json", "**/npm-shrinkwrap.json", "**/yarn.lock", "**/pnpm-lock.yaml", "**/bun.lockb",
 		// .NET
 		"**/packages.lock.json", "**/paket.lock",
+		// Terraform
+		"**/.terraform.lock.hcl",
 		// any ecosystem
 		"**/*.lock",
 	}},

@@ -72,6 +72,8 @@ func TestClassify(t *testing.T) {
 		{"lib/app.ex", nil},
 		{"lib/main.dart", nil},
 		{"main.tf", nil},
+		{"infra/main.tf", nil},
+		{"infra/x.terraform.lock.hcl", nil},
 		{"scripts/run.sh", nil},
 		{"", nil},
 	}
@@ -153,6 +155,8 @@ func TestClassifyConventions(t *testing.T) {
 		{"test/widget_test.dart", test},
 		{"lib/src/parser_test.dart", test},
 		// Terraform
+		{".terraform.lock.hcl", lock},
+		{"infra/prod/.terraform.lock.hcl", lock},
 		{"modules/vpc/main.tftest.hcl", test},
 		{"vpc.tftest.json", test},
 		// Shell
