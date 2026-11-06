@@ -7,7 +7,9 @@ import (
 
 // Class is a kind of changed path that the scorer treats specially: size
 // leaves out docs, generated and lock files, and the tests measure looks for
-// test files.
+// test files. Non-code files configure the repo or hold plain data rather
+// than implement; no measure leaves them out by default yet, the rules toggle
+// does that.
 type Class string
 
 // The path classes. Classify returns them in this order.
@@ -15,6 +17,7 @@ const (
 	ClassDocs      Class = "docs"
 	ClassGenerated Class = "generated"
 	ClassLock      Class = "lock"
+	ClassNonCode   Class = "non_code"
 	ClassTest      Class = "test"
 )
 
@@ -60,6 +63,16 @@ var builtin = []struct {
 		"**/.terraform.lock.hcl",
 		// any ecosystem
 		"**/*.lock",
+	}},
+	{ClassNonCode, []string{
+		// repo and editor config
+		"**/.gitignore", "**/.gitattributes", "**/.editorconfig",
+		// config formats
+		"**/*.toml", "**/*.ini", "**/*.cfg",
+		// example environment
+		"**/.env.example",
+		// plain data
+		"**/*.csv",
 	}},
 	{ClassTest, []string{
 		// Go

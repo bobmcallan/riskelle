@@ -13,8 +13,8 @@ import (
 )
 
 // TestCollectClassifiesChangedPaths drives collection against a fixture
-// repository whose branch touches Go, JavaScript, .NET and Python files of every
-// class, and checks each changed file's classes in the facts JSON: one or more
+// repository whose branch touches Go, JavaScript, .NET and Python files, config
+// and data files, of every class, and checks each changed file's classes in the facts JSON: one or more
 // classes in a fixed order, or no "classes" key at all.
 func TestCollectClassifiesChangedPaths(t *testing.T) {
 	dir := t.TempDir()
@@ -49,6 +49,11 @@ func TestCollectClassifiesChangedPaths(t *testing.T) {
 		// docs
 		"README.md":      {"docs"},
 		"docs/setup.txt": {"docs"},
+		// config and data
+		".gitignore":             {"non_code"},
+		"config/app.toml":        {"non_code"},
+		"data/rates.csv":         {"non_code"},
+		"pkg/testdata/rates.csv": {"non_code", "test"},
 	}
 	for p := range changed {
 		writeFile(t, dir, p, "x\n")

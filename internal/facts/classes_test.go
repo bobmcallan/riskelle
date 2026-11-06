@@ -49,6 +49,7 @@ func TestClassify(t *testing.T) {
 		{"README.md", []Class{ClassDocs}},
 		{"api/x.pb.go", []Class{ClassGenerated}},
 		{"go.sum", []Class{ClassLock}},
+		{"app.toml", []Class{ClassNonCode}},
 		{"main_test.go", []Class{ClassTest}},
 		// paths in no class
 		{"main.go", nil},
@@ -172,6 +173,41 @@ func TestClassifyConventions(t *testing.T) {
 	}
 }
 
+// TestClassifyNonCode covers each approved non-code format, at the repo root
+// and nested, and the near misses that must stay out of the class.
+func TestClassifyNonCode(t *testing.T) {
+	nonCode := []Class{ClassNonCode}
+	tests := []struct {
+		path string
+		want []Class
+	}{
+		{".gitignore", nonCode},
+		{"web/.gitignore", nonCode},
+		{".gitattributes", nonCode},
+		{".editorconfig", nonCode},
+		{"pyproject.toml", nonCode},
+		{"config/app.toml", nonCode},
+		{"config/app.ini", nonCode},
+		{"setup.cfg", nonCode},
+		{".env.example", nonCode},
+		{"svc/.env.example", nonCode},
+		{"data/rates.csv", nonCode},
+		// left out
+		{".env", nil},
+		{"config.yaml", nil},
+		{"settings.json", nil},
+		{"app.toml.bak", nil},
+		{"gitignore", nil},
+		{"DATA.CSV", nil},
+		{"Cargo.lock", []Class{ClassLock}},
+	}
+	for _, tt := range tests {
+		if got := Classify(tt.path); !reflect.DeepEqual(got, tt.want) {
+			t.Errorf("Classify(%q) = %v, want %v", tt.path, got, tt.want)
+		}
+	}
+}
+
 func TestClassifyMultipleClasses(t *testing.T) {
 	tests := []struct {
 		path string
@@ -182,6 +218,9 @@ func TestClassifyMultipleClasses(t *testing.T) {
 		{"vendor/github.com/a/b/README.md", []Class{ClassDocs, ClassGenerated}},
 		// matches two docs patterns, carries the class once
 		{"docs/guide/intro.md", []Class{ClassDocs}},
+		{"pkg/testdata/rates.csv", []Class{ClassNonCode, ClassTest}},
+		{"docs/example.toml", []Class{ClassDocs, ClassNonCode}},
+		{"vendor/github.com/a/b/Cargo.toml", []Class{ClassGenerated, ClassNonCode}},
 	}
 	for _, tt := range tests {
 		if got := Classify(tt.path); !reflect.DeepEqual(got, tt.want) {
@@ -193,7 +232,7 @@ func TestClassifyMultipleClasses(t *testing.T) {
 // TestBuiltinOrder pins that the table lists each class once, in Class order,
 // which is what keeps Classify's result sorted.
 func TestBuiltinOrder(t *testing.T) {
-	want := []Class{ClassDocs, ClassGenerated, ClassLock, ClassTest}
+	want := []Class{ClassDocs, ClassGenerated, ClassLock, ClassNonCode, ClassTest}
 	var got []Class
 	for _, b := range builtin {
 		got = append(got, b.class)
