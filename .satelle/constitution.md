@@ -1,9 +1,3 @@
----
-type: constitution
-title: riskelle constitution
-description: Order-zero context for riskelle — the goal, the scoring invariants, and how work is sized here.
----
-
 # riskelle constitution
 
 - **What this repo is:** riskelle, a standalone, deterministic tool that scores
@@ -34,29 +28,26 @@ description: Order-zero context for riskelle — the goal, the scoring invariant
   - Every result is kept and reproducible: each report records the riskelle
     version and the rules source, commit and hash.
 - **Independence:** riskelle must not depend on id4me or any one consumer. The
-  Python scorer in id4me.pipelines (`risk/risk_score.py`, `rules.default.json`)
-  is prior art to port in shape, not code to copy; leave its ADO posting layer
-  behind.
+  Python scorer in id4me.pipelines is prior art to port in shape, not code to
+  copy.
 - **Ground rules:** practise what we measure — each story is one small, focused
   slice that would score low on its own. If a story's estimate is high, split
-  it. Keep agent config (`.claude/`, `.satelle/`, `CLAUDE.md`, `AGENTS.md`)
-  gitignored; never commit a `CLAUDE.md`.
-- **Where work happens:** trunk based, one story per branch and worktree. Before
-  engaging a story, open its tree with `satelle story worktree <id> --base main`
-  (branch `story/<id>` under `../riskelle-trees/`) and drive the story from
-  there. The merge step lands the story on `main`; the release step tags it and
-  watches the release run.
-- **Implementing an epic** means driving every story `satelle story wave`
-  names in parallel, each in its own worktree, through to done, then closing
-  the epic. The developer does not need to ask for parallel or for the work to
-  continue: it does not stop to ask until it is blocked, meaning a gate that
-  cannot be satisfied, a decision only the developer can make, or a failure
-  that two attempts did not fix. A blocked story is surfaced while its
-  siblings carry on.
-- **Every tracked change reaches main through its story, before it closes, in
-  every lane** (substrate and docs included). Stage only the story's own paths
-  (never `git add -A`), commit with a conventional subject ending in the story
-  id (`docs: … (sty_…)`), and publish with `satelle trunk publish --story <id>`.
-  Never force-push.
-- **Where the process lives:** authored substrate under `.satelle/` (workflows,
-  principles, skills) — edited without a binary release.
+  it. `CLAUDE.md` and `AGENTS.md` are never committed; `.satelle/` is tracked.
+- **Where work happens:** one item per branch and worktree: branch `<id>` under
+  `../riskelle-trees/<id>`, seated with `satelle story seat <id> --base
+  origin/main` (the `coder` skill). DEV (plan, code, integrate) ends at
+  `approved`: a tested head, pushed, with an open pull request. CI/CD is a run
+  of the release task (tagged `release`; `.satelle/skills/release.md`): it
+  fast-forwards main to the approved heads, tags the next version, waits for
+  the GitHub release, installs it, and only then closes the items.
+- **Implementing an epic** (an item tagged `epic`) means driving every open
+  child in parallel, each in its own worktree, to approved, then releasing them
+  together. Do not stop to ask until blocked: a gate that cannot be satisfied,
+  a decision only the developer can make, or a failure two attempts did not
+  fix. Park a blocked item while its siblings carry on.
+- **Every change reaches main through an item's pull request and a release
+  run.** Stage only the item's own paths (never `git add -A`), commit with a
+  conventional subject ending in the item id, never force-push. Process-only
+  changes under `.satelle/` are a `chore`.
+- **Where the process lives:** `.satelle/` — workflows, skills, agents and this
+  constitution — edited without a binary release.

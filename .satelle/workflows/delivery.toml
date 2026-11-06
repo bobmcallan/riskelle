@@ -1,0 +1,140 @@
+# A story. DEV: plan, code, integrate, and end at approved (tested locally,
+# pushed, an open pull request). CI/CD: a run of the release task takes the
+# approved items, fast-forwards main, tags the next version, waits for the
+# GitHub release, installs it, and only then moves them to done. Modelled on
+# orbelle/satelle's delivery.toml.
+name = "delivery"
+
+[states.backlog]
+start = true
+
+[states.plan]
+performer = { agent = "planner", skill = "plan" }
+
+[states.in_progress]
+performer = { agent = "executor", skill = "coder" }
+
+[states.integration]
+
+# DEV ends here: an open pull request whose head is tested and contains main.
+# A run of the release task takes the item; one that cannot land it sends it
+# back to in_progress with the reason.
+[states.approved]
+
+[states.blocked]
+park = true
+resumes = true
+
+[states.done]
+terminal = true
+
+[states.cancelled]
+terminal = true
+
+# ---- gates ----
+
+[gates.plan-review]
+skill = "riskelle-plan-review"
+panel = ["reviewer-alt", "reviewer-grok"]
+combine = "all"
+carry = true
+
+# riskelle scores its own stories: the estimate entering in_progress (a High is
+# sent back to be split), the actual score of the pushed head entering approved.
+[gates.risk]
+skill = "riskelle-risk-check"
+
+[gates.definition-unchanged]
+skill = "riskelle-definition-unchanged-check"
+
+[gates.format-vet]
+skill = "riskelle-format-vet-check"
+carry = true
+
+[gates.build-unit]
+skill = "riskelle-build-unit-check"
+carry = true
+
+[gates.code-review]
+skill = "riskelle-code-review"
+agent = "reviewer-alt"
+carry = true
+
+# The full local suite, once, on the head that will be released.
+[gates.integration-check]
+skill = "riskelle-integration-check"
+
+[gates.pr-ready]
+skill = "riskelle-pr-ready-check"
+
+# CI/CD's gates on approved -> done: only a run of the release task closes an
+# item, after the tag, the GitHub release and the install.
+[gates.release-run]
+skill = "riskelle-release-run-check"
+
+[gates.release-published]
+skill = "riskelle-release-published-check"
+
+[gates.release-installed]
+skill = "riskelle-release-installed-check"
+
+[gates.blocked-review]
+skill = "riskelle-blocked-review"
+agent = "reviewer-alt"
+
+[gates.cancel-review]
+skill = "riskelle-cancel-review"
+agent = "reviewer-alt"
+
+# ---- transitions ----
+
+[[transition]]
+from = ["backlog"]
+to = "plan"
+
+[[transition]]
+from = ["plan"]
+to = "in_progress"
+groups = [{ mode = "sequential", gates = ["risk", "plan-review"] }]
+
+[[transition]]
+from = ["in_progress"]
+to = "integration"
+groups = [
+  { mode = "sequential", gates = ["definition-unchanged", "format-vet", "build-unit"] },
+  { mode = "sequential", gates = ["code-review"] },
+]
+
+[[transition]]
+from = ["integration"]
+to = "approved"
+groups = [{ mode = "sequential", gates = ["integration-check", "pr-ready", "risk"] }]
+
+[[transition]]
+from = ["approved"]
+to = "done"
+groups = [{ mode = "sequential", gates = ["release-run", "release-published", "release-installed"] }]
+
+# Rework: back to coding from integration, or from approved when a release run
+# cannot land the item (it records why on the item); and back to planning.
+[[transition]]
+from = ["integration", "approved"]
+to = "in_progress"
+
+[[transition]]
+from = ["in_progress"]
+to = "plan"
+
+[[transition]]
+from = ["*"]
+to = "blocked"
+groups = [{ mode = "sequential", gates = ["blocked-review"] }]
+
+[[transition]]
+from = ["blocked"]
+to = "@prior"
+
+[[transition]]
+from = ["*", "blocked"]
+to = "cancelled"
+groups = [{ mode = "sequential", gates = ["cancel-review"] }]

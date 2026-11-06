@@ -13,32 +13,6 @@
 CLAUDE.md
 AGENTS.md
 
-# >>> satelle (managed) >>>
-# satelle adds only entries it needs that this file does not already settle;
-# the operator owns .gitignore and any rule written here or elsewhere is kept.
-# Runtime state lives under ~/.satelle/<repo-key>/, outside the repo.
-sty_*_body.md
-sty_*_ac.md
+# satelle: .satelle/ is tracked; secrets and machine-local overrides are not.
 .satelle/**/.env
-.satelle/logs
-.satelle/hooks
-.satelle/deployed.version
-.satelle/*.local.toml
-.satelle/workflows/agents.local.toml
-.satelle/satelle
-.satelle/tasks/*/exe_*.md
-!.satelle/
-# <<< satelle (managed) <<<
-
-# Operator (2026-11-04): .satelle/ substrate is tracked in git. Task run
-# records/outputs, config bundles, backups and local/db state stay
-# machine-local; files a task needs (scripts, reports) are tracked.
-.satelle/tasks/*/output-exe_*.md
-.satelle/tasks/*/route.md
-.satelle/tasks/*/config-*.md
-.satelle/tasks/*/exe_*.md
-.satelle/backups/
-.satelle/**/*.bak
-.satelle/**/*.bak-*
 .satelle/**/*.local.*
-.satelle/**/*.db*

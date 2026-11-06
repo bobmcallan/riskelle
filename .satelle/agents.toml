@@ -1,0 +1,26 @@
+# This repo's agent bindings. A workflow names which binding performs a state
+# or judges a gate. A judge's grant must be read-only and its adapter must
+# enforce grants. Modelled on orbelle/satelle's bindings.
+
+# The interactive session codes and runs tasks; nothing is dispatched.
+[agents.executor]
+command = "session"
+
+# Dispatched planner: reads the repo and hands back a `plan` artifact.
+[agents.planner]
+command = "claude"
+model = "opus"
+effort = "high"
+tools = ["Read", "Grep", "Glob", "Bash(satelle story attach:*)", "Bash(satelle story get:*)"]
+
+# The gates' judge: Gemini 3.8 flash on pi through the Cursor provider.
+[agents.reviewer-alt]
+command = "pi -e /home/bobmcallan/.pi/agent/npm/node_modules/@rahularya01/pi-cursor"
+model = "cursor/gemini-3.8-flash"
+effort = "off"
+tools = ["Read", "Grep", "Glob"]
+
+# Second plan judge: both must accept a plan.
+[agents.reviewer-grok]
+command = "grok"
+tools = ["Read", "Grep", "Glob"]

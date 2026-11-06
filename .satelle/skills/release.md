@@ -1,100 +1,121 @@
 ---
 name: release
-scope: project
-type: skill
-tags: [type:skill]
-evidence_commands: gh run watch
-description: In-loop executor rubric for riskelle's release step. Tags the next version on the merged main head, pushes the tag, watches the GitHub release run (binaries and checksums on GitHub Releases) to completion, verifies the release, and attaches the evidence for the Claude release reviewer. Never moves main, never advances status.
+description: CI/CD — the procedure a run of the release task (the task tagged release) follows over the approved items it took: fast-forward main to each tested pull-request head without re-testing, send back any head that no longer fast-forwards, tag the next version once, wait for release.yml, install the published build here, check it, only then move each item to done, and clear the finished worktrees. Never forces, never merges or rebases main.
 ---
 
-# Release (in-loop, release)
+# Release (CI/CD)
 
-The story is on `origin/main`. Ship it: a GitHub Release with the binaries and
-a checksums file, built by the release workflow from a version tag, and, once
-that workflow deploys it, the project site on GitHub Pages
-(https://bobmcallan.github.io/riskelle/).
+DEV ends at `approved`: an open pull request whose head contains `origin/main`
+and passed the full local suite on exactly that tree. A release run does not
+test again: it ships only heads that fast-forward `main`, which are the trees
+that were tested. A head that no longer fast-forwards goes back through the
+loop with the reason recorded on the item.
 
-## Before the release pipeline exists
+Items reach `done` only through a run: the `release-run` gate refuses any item
+no in-progress run lists. Any step that fails stops the run: record the reason
+in the run's `release-evidence`, leave the items as they are and end the turn.
 
-Until `.github/workflows/release.yml` exists on `origin/main`, there is nothing
-to release. Check with `git cat-file -e origin/main:.github/workflows/release.yml`.
-If it is absent, attach the evidence with `Outcome: no-release-pipeline` and the
-`origin/main` sha, cut no tag, and request `done`. The release reviewer accepts
-this only while the file is absent.
+Never: run a test suite, merge or rebase onto main, force-push, move or delete
+a pushed tag, take an item not in the run's inputs, or close an item before
+step 6 passes.
 
-## Do
+## 0. Start and read the run
 
-1. **Pick the version.** Latest tag: `git describe --tags --abbrev=0 origin/main`
-   (none means start at `v0.1.0`). Before 1.0, a `feature` story bumps the
-   minor version and anything else the patch.
-2. **Tag the merged head and push the tag, under the landing lock.** Sibling
-   stories release too, so read the latest tag and push the next one while
-   holding the lock merge.md lands under, in one Bash call started in the
-   story's worktree:
+```sh
+git fetch -q origin --tags
+task=$(satelle task list --tag release --json | jq -r '.[0].id')
+exe=$(satelle task run "$task" --base origin/main --json | jq -r .id)
+satelle execution set "$exe" --status in_progress                # validate-before
+satelle execution seat "$exe"
+satelle ledger list "$exe" --kind task.run --json | jq -r '.[0].payload.inputs[]'
+```
 
-   ```bash
-   common=$(git rev-parse --path-format=absolute --git-common-dir)
-   flock "$common/riskelle-land.lock" -c '
-     git fetch origin --tags &&
-     git describe --tags --abbrev=0 origin/main &&
-     git tag -a vX.Y.Z origin/main -m "vX.Y.Z (<story id>)" &&
-     git push origin vX.Y.Z'
-   ```
+For each input item find its pull request, the open PR against main whose
+title ends `(<id>)` (`gh pr list --state open --base main --json number,headRefOid,title`),
+and record `<id> PR #<n> head <sha>`. An item with no open pull request goes
+on the send-back list.
 
-   Pick vX.Y.Z from the tag `git describe` prints inside the lock (run it
-   once inside the lock first if unsure); a push refused because the tag
-   exists means a sibling took it: take the next one.
+## 1. Order and fast-forward, in git only
 
-3. **Watch the release run to the end.**
+Sort the items by `git rev-list --count origin/main..<head>`, fewest first.
+Start with `tip=origin/main`. For each item:
 
-   ```bash
-   gh run list --workflow release.yml --branch vX.Y.Z --limit 1 --json databaseId,url
-   gh run watch <run id> --exit-status
-   ```
+- its head is already on main (`git merge-base --is-ancestor <head> origin/main`): keep it (a resumed run);
+- else `git merge-base --is-ancestor $tip <head>`: keep it, `tip=<head>`;
+- else send it back: "head <sha> does not contain main <tip> after <earlier ids>; rebase onto origin/main and come through integration again".
 
-   A failed run goes back to `in_progress` with the run's log: request it. Never
-   move or delete a pushed tag. Fix forward with a new patch version.
-4. **Verify what shipped.**
+Send back each item on the list; it reopens:
 
-   ```bash
-   gh release view vX.Y.Z --json tagName,assets
-   ```
+```sh
+printf '%s\n' "<reason>" | satelle story attach <id> --name release-sendback --file -
+satelle story set <id> --status in_progress
+```
 
-   When the release workflow at the tag deploys Pages
-   (`git show vX.Y.Z:.github/workflows/release.yml | grep -q actions/deploy-pages`),
-   also check the site: the run's Pages deploy job concluded `success`, and the
-   site answers 200.
+If no item is kept, stop: "nothing fast-forwards".
 
-   ```bash
-   gh run view <run id> --json jobs --jq '.jobs[] | "\(.name) \(.conclusion)"'
-   curl -fsS -o /dev/null -w '%{http_code}\n' https://bobmcallan.github.io/riskelle/
-   ```
+## 2. Push main once
 
-5. **Attach the evidence.** Add the `Pages:` line only when the workflow
-   deploys Pages.
+```sh
+git push origin "$tip:refs/heads/main"   # plain: refused unless it fast-forwards
+```
 
-   ```bash
-   satelle story attach <id> --name release-evidence --type output --file - <<'EOF'
-   Outcome: released
-   Tag: vX.Y.Z  (on origin/main <sha>)
-   Release run: <url>  conclusion: success
-   Assets: <names>
-   Pages: https://bobmcallan.github.io/riskelle/  deploy job: success  HTTP 200
-   EOF
-   ```
+GitHub marks each pull request merged, because main now contains its head.
 
-6. **Leave nothing on the remote.** If `story/<id>` was ever pushed, delete it
-   now, while the story is still engaged (a push after done has no story to
-   be attributed to and is refused):
+## 3. Tag once
 
-   ```bash
-   git ls-remote --exit-code --heads origin story/<id> && git push origin --delete story/<id>
-   ```
+Latest tag: `git tag -l 'v[0-9]*' | sed 's/^v//' | sort -V | tail -1`. If it
+already points at `$tip` (a resumed run), keep it. Otherwise bump: a `feature`
+item in the run bumps the minor version, else the patch (before 1.0).
 
-7. Stop. Request `release → done`.
+```sh
+git tag -a "v<ver>" "$tip" -m "v<ver> (<exe>: <ids>)"
+git push origin "v<ver>"      # refused if the tag exists: take the next one
+```
 
-## After done
+## 4. Watch the release
 
-Remove the story's worktree and local branch, from the main tree:
-`git worktree remove <path>` and `git branch -d story/<id>`. Both are local and
-need no seat.
+The tag triggers `release.yml` (test, archives, checksums, GitHub Release,
+Pages).
+
+```sh
+gh run list --workflow release.yml --branch "v<ver>" --limit 1 --json databaseId,url
+gh run watch <id> --exit-status
+gh release view "v<ver>" --json tagName,assets
+curl -fsS -o /dev/null -w '%{http_code}\n' https://bobmcallan.github.io/riskelle/
+```
+
+A failed run stops the release; fix forward with a new item and a new patch.
+
+## 5. Install here
+
+```sh
+curl -fsSL https://github.com/bobmcallan/riskelle/releases/latest/download/install.sh | sh
+```
+
+## 6. Check
+
+`riskelle version` names `v<ver>` and origin/main's commit (the
+release-installed gate's pattern). A mismatch stops the run.
+
+## 7. Close
+
+For each released item: `satelle story set <id> --status done` (its gates:
+release-run, release-published, release-installed, judged while the run is in
+progress). Then attach the evidence to the run:
+
+```sh
+satelle execution attach "$exe" --name release-evidence --file - <<'EOF'
+<per item: id, PR, head sha, released or sent back with the reason>
+<main before and after; tag v<ver>; release.yml run URL and conclusion>
+<assets; Pages HTTP status; riskelle version line; each item's final status>
+EOF
+satelle execution set "$exe" --status done      # validate-after
+satelle execution release "$exe"
+```
+
+## 8. Clear the finished worktrees
+
+From the main checkout: for each released item, `git worktree remove
+../riskelle-trees/<id>`, `git branch -d <id>`, `git push origin --delete <id>`;
+then `git switch main && git merge --ff-only origin/main`. Never remove a
+worktree with uncommitted or unpushed work: report it instead.
