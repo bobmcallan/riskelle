@@ -3,8 +3,10 @@ package score
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/bobmcallan/riskelle/internal/facts"
@@ -399,6 +401,12 @@ func TestScoreDoesNotAliasInput(t *testing.T) {
 	if got := entry(t, r, "spread", "directories").From[0]; got != "." {
 		t.Errorf("result changed with its input: %q", got)
 	}
+	f.Consequences = []facts.Consequence{{Class: facts.ConsequenceIdentityRights, Paths: []string{"a.tf"}, Types: []string{"aws_iam_role"}}}
+	r = Score(f, Default())
+	f.Consequences[0].Paths[0], f.Consequences[0].Types[0] = "changed", "changed"
+	if c := r.Consequences[0]; c.Paths[0] != "a.tf" || c.Types[0] != "aws_iam_role" {
+		t.Errorf("consequence changed with its input: %+v", c)
+	}
 }
 
 func TestRepoGeneratedPathsLeftOutOfSize(t *testing.T) {
@@ -524,5 +532,143 @@ func TestScoreReadsTestLanguages(t *testing.T) {
 	with := entry(t, Score(facts.Facts{Files: files, TestLanguages: []string{"Shell"}}, Default()), "tests", "untested_production_files")
 	if without.Value != 0 || with.Value != 1 {
 		t.Errorf("untested without shell tests = %d, with = %d; want 0 and 1", without.Value, with.Value)
+	}
+}
+
+// identityRights is one identity_rights consequence, as facts give it.
+var identityRights = []facts.Consequence{{
+	Class: facts.ConsequenceIdentityRights, Paths: []string{"iam/main.tf"}, Types: []string{"azurerm_role_assignment"},
+}}
+
+// levelFacts builds facts that total the given TestTotalLevel row.
+func levelFacts(lines, files, dirs, projects int) facts.Facts {
+	f := facts.Facts{Directories: names("d", dirs), Projects: names("p", projects)}
+	f.Files = []facts.File{
+		{Path: "main.go", Added: lines, New: true},
+		{Path: "main_test.go", New: true, Classes: []facts.Class{facts.ClassTest}},
+	}
+	for _, p := range names("f", files-2) {
+		f.Files = append(f.Files, facts.File{Path: p, New: true})
+	}
+	return f
+}
+
+func TestConsequenceFloorsLevel(t *testing.T) {
+	tests := []struct {
+		name string
+		f    facts.Facts
+		want Level
+	}{
+		{"Low total floored to Medium", levelFacts(0, 2, 0, 0), Medium},
+		{"Medium total stays Medium", levelFacts(401, 2, 0, 0), Medium},
+		{"High total stays High", levelFacts(801, 6, 3, 3), High},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			without := Score(tt.f, Default())
+			tt.f.Consequences = identityRights
+			with := Score(tt.f, Default())
+			if with.Level != tt.want {
+				t.Errorf("level = %s, want %s", with.Level, tt.want)
+			}
+			if with.Total != without.Total || !reflect.DeepEqual(with.Breakdown, without.Breakdown) {
+				t.Errorf("a floor changed the total or breakdown: %d vs %d", with.Total, without.Total)
+			}
+			want := []Consequence{{Consequence: identityRights[0], Floor: Medium}}
+			if !reflect.DeepEqual(with.Consequences, want) {
+				t.Errorf("consequences = %+v, want %+v", with.Consequences, want)
+			}
+		})
+	}
+}
+
+func TestNoConsequenceScoresAsBefore(t *testing.T) {
+	for _, f := range []facts.Facts{mixed(), levelFacts(201, 11, 3, 2), levelFacts(401, 2, 0, 0), levelFacts(801, 16, 9, 3)} {
+		r := Score(f, Default())
+		if r.Consequences != nil || r.Level != level(r.Total, Default().Levels) {
+			t.Errorf("total %d: level %s consequences %v, want the total's own level and none", r.Total, r.Level, r.Consequences)
+		}
+		if b, _ := json.Marshal(r); strings.Contains(string(b), `"consequences"`) {
+			t.Errorf("result JSON has a consequences key: %s", b)
+		}
+	}
+}
+
+func TestConsequenceWithoutFloor(t *testing.T) {
+	r := Default()
+	r.ConsequenceFloors = nil
+	f := levelFacts(0, 2, 0, 0)
+	f.Consequences = identityRights
+	res := Score(f, r)
+	if res.Level != Low || len(res.Consequences) != 1 || res.Consequences[0].Floor != Low {
+		t.Errorf("level %s consequences %+v, want Low with floor Low", res.Level, res.Consequences)
+	}
+}
+
+func TestDefaultFloors(t *testing.T) {
+	d := Default()
+	if want := []Floor{{facts.ConsequenceIdentityRights, Medium}}; !reflect.DeepEqual(d.ConsequenceFloors, want) {
+		t.Errorf("floors = %+v, want %+v", d.ConsequenceFloors, want)
+	}
+	for i, fl := range d.ConsequenceFloors {
+		if !facts.IsConsequence(fl.Class) {
+			t.Errorf("floor for unknown class %q", fl.Class)
+		}
+		known := false
+		for _, e := range d.Levels {
+			known = known || e.Level == fl.Level
+		}
+		if !known {
+			t.Errorf("floor %q level %q is not a level", fl.Class, fl.Level)
+		}
+		if i > 0 && d.ConsequenceFloors[i-1].Class >= fl.Class {
+			t.Error("floors are not sorted by class")
+		}
+	}
+}
+
+// TestReadmeDocumentsFloors pins the README's floor rule against the built-in
+// floors.
+func TestReadmeDocumentsFloors(t *testing.T) {
+	data, err := os.ReadFile("../../README.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	section := func(heading string) string {
+		s := string(data)
+		i := strings.Index(s, "\n"+heading+"\n")
+		if i < 0 {
+			t.Fatalf("README has no %q section", heading)
+		}
+		s = s[i+len(heading)+2:]
+		level := strings.Repeat("#", strings.Index(heading, " "))
+		for j := 0; j < len(s); j++ {
+			if (j == 0 || s[j-1] == '\n') && strings.HasPrefix(s[j:], "#") {
+				hashes := len(s[j:]) - len(strings.TrimLeft(s[j:], "#"))
+				if hashes <= len(level) {
+					return s[:j]
+				}
+			}
+		}
+		return s
+	}
+	cons := section("### Consequences")
+	for _, fl := range Default().ConsequenceFloors {
+		for _, want := range []string{"`" + fl.Class + "`", string(fl.Level)} {
+			if !strings.Contains(cons, want) {
+				t.Errorf("README Consequences lacks %s", want)
+			}
+		}
+	}
+	for _, want := range []string{"floor", "rules hash", "refused", "never changes the total"} {
+		if !strings.Contains(cons, want) {
+			t.Errorf("README Consequences lacks %q", want)
+		}
+	}
+	if strings.Contains(cons, "a later release") {
+		t.Error("README Consequences still says a later release sets the floor")
+	}
+	if !strings.Contains(section("## Rules"), "`consequence_floors`") {
+		t.Error("README Rules lacks `consequence_floors`")
 	}
 }

@@ -30,6 +30,13 @@ type LevelEdge struct {
 	Level Level `json:"level"`
 }
 
+// Floor is the lowest level a change carrying a consequence class is
+// reported at. A floor only raises the level; it never adds points.
+type Floor struct {
+	Class string `json:"class"` // a facts consequence class
+	Level Level  `json:"level"`
+}
+
 // Rules are everything Score needs besides the facts. They are a value passed
 // in, so the built-in rules and (later) rules extended from a repository's
 // .risk/rules.json are scored by the same function.
@@ -50,6 +57,10 @@ type Rules struct {
 	ImpactDependents Bands         `json:"impact_dependents"`
 
 	Levels []LevelEdge `json:"levels"` // ascending, the first at Min 0
+
+	// Built-in floors, one per consequence class, sorted by class. Always set
+	// and always hashed; .risk/rules.json may not set them.
+	ConsequenceFloors []Floor `json:"consequence_floors"`
 
 	// Repo-added sensitive areas (.risk/rules.json): globs by area name,
 	// beside the built-in areas in facts. Report context only, never scored;
@@ -86,5 +97,8 @@ func Default() Rules {
 		ImpactDependents: Bands{{0, 0}, {3, 2}, {6, 4}, {11, 7}, {21, 10}},
 
 		Levels: []LevelEdge{{0, Low}, {20, Medium}, {40, High}},
+
+		// A consequence raises the level to at least its floor, never the total.
+		ConsequenceFloors: []Floor{{facts.ConsequenceIdentityRights, Medium}},
 	}
 }

@@ -2,7 +2,7 @@
   "kind": "estimate",
   "plan": "plan.json",
   "total": 7,
-  "level": "Low",
+  "level": "Medium",
   "breakdown": [
     {
       "measure": "size",
@@ -38,6 +38,16 @@
           "dependents": 1
         }
       ]
+    }
+  ],
+  "consequences": [
+    {
+      "class": "identity_rights",
+      "paths": [
+        "iam/roles.tf"
+      ],
+      "types": [],
+      "floor": "Medium"
     }
   ],
   "context": {

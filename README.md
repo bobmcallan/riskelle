@@ -63,7 +63,8 @@ case-insensitively, are `do not edit`, `do not modify`, `@generated` and
 
 Each measure scores points in fixed bands; the total is 0–100, reported as Low,
 Medium or High. The band edges are calibrated from real merge history before
-anyone is measured.
+anyone is measured. A consequence (below) can raise the reported level to its
+floor; it never changes the total.
 
 Where a change lands (auth, migrations, infrastructure, secrets) is shown on the
 report as context for reviewers, but does not count towards the score: it is the
@@ -75,12 +76,18 @@ A consequence is what a change *does*, read from its changed lines, not where
 it lands. riskelle finds each consequence class in a built-in, versioned
 catalog, mechanically and the same way every time, and records it in the facts
 as `"consequences"`: the class, the paths that triggered it and the block types
-that did. The facts record the class only; a later release makes each class set
-a floor on the reported level.
+that did.
 
-| Class | Terraform types (globs) |
-| --- | --- |
-| `identity_rights` | `aws_iam_*`, `azuread_app_role_assignment`, `azuread_application*`, `azuread_directory_role*`, `azuread_service_principal*`, `azurerm_federated_identity_credential`, `azurerm_role_assignment`, `azurerm_role_definition`, `azurerm_user_assigned_identity`, `google_*_iam_*` |
+Each class sets a **floor**: the reported level is the higher of the total's
+own level and every consequence's floor. A floor never changes the total or any
+breakdown entry, so the shape score still rewards small changes, and splitting a
+change cannot lower a floor: the class lands in whichever change carries it.
+The floors are built in (`consequence_floors`), recorded in the rules hash on
+every report, and refused by name if `.risk/rules.json` sets them.
+
+| Class | Floor | Terraform types (globs) |
+| --- | --- | --- |
+| `identity_rights` | Medium | `aws_iam_*`, `azuread_app_role_assignment`, `azuread_application*`, `azuread_directory_role*`, `azuread_service_principal*`, `azurerm_federated_identity_credential`, `azurerm_role_assignment`, `azurerm_role_definition`, `azurerm_user_assigned_identity`, `google_*_iam_*` |
 
 - Only `.tf` files are read, and in them only `resource` and `data` blocks of a
   catalogued type. A mention of a type in any other file never counts.
@@ -262,8 +269,10 @@ version, rules source, rules commit and hash, and the two exclusion toggles). A 
 and head commits it measured (`"base"`, `"head"`); an estimate is marked as
 one and names its plan file. The sensitive areas the change lands in sit apart,
 under `"context"` (JSON) or "Where it lands (context, not scored)" (Markdown),
-labelled as context that does not count towards the score. The same result
-always prints the same bytes.
+labelled as context that does not count towards the score. The consequences the
+change carries sit under `"consequences"` (class, paths, types and floor; `[]`
+when none) and, in Markdown, under "Consequences (floor the level)", shown only
+when there is one. The same result always prints the same bytes.
 
 ## With satelle
 
@@ -332,8 +341,8 @@ line it leaves for reviewers, is in the skill file itself.
 
 ## Rules
 
-- **Built in, versioned with each release:** the measures, weights, bands and
-  default patterns. Changed only by a riskelle release, so the scale is the same
+- **Built in, versioned with each release:** the measures, weights, bands,
+  consequence floors (`consequence_floors`) and default patterns. Changed only by a riskelle release, so the scale is the same
   everywhere.
 - **`.risk/rules.json` in the assessed repo:** settings that can only *add*
   risk or context (extra generated paths for the report, extra sensitive

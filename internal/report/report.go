@@ -26,17 +26,25 @@ var Formats = []string{"json", "markdown"}
 // Note labels where a change lands, in every format.
 const Note = "Where the change lands is context for reviewers; it does not count towards the score."
 
+// FloorHeading titles the Markdown section listing consequences.
+const FloorHeading = "Consequences (floor the level)"
+
+// FloorNote explains consequences, in every format that lists them.
+const FloorNote = "Each consequence raises the level to at least its floor; it never changes the total or the breakdown."
+
 // Report is what riskelle prints for one scored change.
 type Report struct {
-	Kind       string           `json:"kind"`           // KindScore or KindEstimate
-	Plan       string           `json:"plan,omitempty"` // estimate only: the plan file as given
-	Base       string           `json:"base,omitempty"` // score only: full SHA the base ref resolved to
-	Head       string           `json:"head,omitempty"` // score only: full SHA the head ref resolved to
-	Total      int              `json:"total"`
-	Level      score.Level      `json:"level"`
-	Breakdown  []score.Point    `json:"breakdown"`
-	Context    Context          `json:"context"`
-	Provenance score.Provenance `json:"provenance"`
+	Kind      string        `json:"kind"`           // KindScore or KindEstimate
+	Plan      string        `json:"plan,omitempty"` // estimate only: the plan file as given
+	Base      string        `json:"base,omitempty"` // score only: full SHA the base ref resolved to
+	Head      string        `json:"head,omitempty"` // score only: full SHA the head ref resolved to
+	Total     int           `json:"total"`
+	Level     score.Level   `json:"level"`
+	Breakdown []score.Point `json:"breakdown"`
+	// Consequence classes and their floors, sorted by class; [] when none.
+	Consequences []score.Consequence `json:"consequences"`
+	Context      Context             `json:"context"`
+	Provenance   score.Provenance    `json:"provenance"`
 }
 
 // Context is reviewer context: never part of the total or the breakdown.
@@ -55,8 +63,12 @@ func New(kind string, res score.Result) Report {
 	if breakdown == nil {
 		breakdown = []score.Point{}
 	}
+	consequences := res.Consequences
+	if consequences == nil {
+		consequences = []score.Consequence{}
+	}
 	return Report{
-		Kind: kind, Total: res.Total, Level: res.Level, Breakdown: breakdown,
+		Kind: kind, Total: res.Total, Level: res.Level, Breakdown: breakdown, Consequences: consequences,
 		Context: Context{Note: Note, Areas: areas}, Provenance: res.Provenance,
 	}
 }
@@ -106,6 +118,18 @@ func (r Report) Markdown(w io.Writer) error {
 		b.WriteString("\n")
 	}
 	b.WriteString("\n</details>\n\n")
+
+	if len(r.Consequences) > 0 {
+		b.WriteString("### " + FloorHeading + "\n\n" + FloorNote + "\n\n")
+		for _, c := range r.Consequences {
+			types := "none (planned)"
+			if len(c.Types) > 0 {
+				types = codes(c.Types)
+			}
+			fmt.Fprintf(&b, "- %s, floor %s: paths %s; types %s\n", c.Class, c.Floor, codes(c.Paths), types)
+		}
+		b.WriteString("\n")
+	}
 
 	b.WriteString("### Where it lands (context, not scored)\n\n" + Note + "\n\n")
 	if len(r.Context.Areas) == 0 {

@@ -24,6 +24,8 @@ func TestParse(t *testing.T) {
 		{`{"size_lines":[]}`, File{}, `refused "size_lines": .risk/rules.json may only add risk or context`},
 		{`{"generated":["gen/**"],"levels":[],"size_lines":[]}`, File{}, `refused "levels", "size_lines": `},
 		{`{"Size_Lines":[]}`, File{}, `refused "Size_Lines": `},
+		{`{"consequence_floors":[]}`, File{}, `refused "consequence_floors": .risk/rules.json may only add risk or context`},
+		{`{"Consequence_Floors":[{"class":"identity_rights","level":"Low"}]}`, File{}, `refused "Consequence_Floors": `},
 		{`{"levels":[],"generated":[""]}`, File{}, `refused "levels": `},
 		{`{"generatd":[]}`, File{}, `unknown field "generatd"`},
 		{`{"generated":["a/**",""]}`, File{}, "generated[1]: empty pattern"},
@@ -198,5 +200,18 @@ func TestApplyToggles(t *testing.T) {
 	}
 	if want := []facts.Class{docs, gen, lock, test, nonCode}; !reflect.DeepEqual(base.SizeExcludes, want) {
 		t.Errorf("Apply changed its input: %v, want %v", base.SizeExcludes, want)
+	}
+}
+
+// TestHashRecordsFloors pins that the rules hash records the consequence
+// floors: lowering one changes the hash.
+func TestHashRecordsFloors(t *testing.T) {
+	d := score.Default()
+	d.ConsequenceFloors[0].Level = score.Low
+	if Hash(d) == Hash(score.Default()) {
+		t.Error("lowering a floor did not change the rules hash")
+	}
+	if Hash(score.Default()) != Hash(score.Default()) {
+		t.Error("the built-in rules hash is not stable")
 	}
 }

@@ -1,4 +1,4 @@
-## riskelle estimate: 7 / 100, Low
+## riskelle estimate: 7 / 100, Medium
 
 Estimate from plan `plan.json`, not a measured diff.
 
@@ -13,6 +13,12 @@ Estimate from plan `plan.json`, not a measured diff.
 - impact / dependents: `example.com/m/core` (4), `ui/a&b<c>.js` (1)
 
 </details>
+
+### Consequences (floor the level)
+
+Each consequence raises the level to at least its floor; it never changes the total or the breakdown.
+
+- identity_rights, floor Medium: paths `iam/roles.tf`; types none (planned)
 
 ### Where it lands (context, not scored)
 

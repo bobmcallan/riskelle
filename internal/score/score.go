@@ -47,11 +47,19 @@ type Point struct {
 
 // Result is a scored change.
 type Result struct {
-	Total      int        `json:"total"` // 0-100
-	Level      Level      `json:"level"`
-	Breakdown  []Point    `json:"breakdown"`           // size/lines; spread/files, directories, projects; degree/existing_lines; branch_age/days, trunk_commits; tests/untested_production_files; impact/dependents
-	Areas      []Area     `json:"areas,omitempty"`     // sensitive areas the change lands in, sorted by name; reviewer context only, never scored; nil when none
-	Provenance Provenance `json:"provenance,omitzero"` // set by the caller that loaded the rules; Score leaves it zero
+	Total        int           `json:"total"` // 0-100
+	Level        Level         `json:"level"`
+	Breakdown    []Point       `json:"breakdown"`              // size/lines; spread/files, directories, projects; degree/existing_lines; branch_age/days, trunk_commits; tests/untested_production_files; impact/dependents
+	Consequences []Consequence `json:"consequences,omitempty"` // consequence classes with their floors, sorted by class; nil when none
+	Areas        []Area        `json:"areas,omitempty"`        // sensitive areas the change lands in, sorted by name; reviewer context only, never scored; nil when none
+	Provenance   Provenance    `json:"provenance,omitzero"`    // set by the caller that loaded the rules; Score leaves it zero
+}
+
+// Consequence is one consequence class the change carries, with the floor
+// the rules give it.
+type Consequence struct {
+	facts.Consequence
+	Floor Level `json:"floor"`
 }
 
 // Area is one sensitive area a change lands in and the changed paths that
@@ -74,8 +82,9 @@ type Provenance struct {
 
 // Score scores the facts of one change against rules. Every breakdown entry is
 // kept, 0 points included, in a fixed order; later measures append theirs.
-// Areas are reviewer context: they are found after the total and never add
-// points.
+// Consequences are read after the total: they never add points and only raise
+// the level to their floor. Areas are reviewer context: they are found after
+// the total and never add points.
 func Score(f facts.Facts, r Rules) Result {
 	var paths []string
 	for _, file := range f.Files {
@@ -98,7 +107,62 @@ func Score(f facts.Facts, r Rules) Result {
 		total += p.Points
 	}
 	total = max(0, min(total, 100))
-	return Result{Total: total, Level: level(total, r.Levels), Breakdown: breakdown, Areas: areas(f.Files, r)}
+	cs := consequences(f, r)
+	return Result{
+		Total: total, Level: floored(level(total, r.Levels), cs, r.Levels),
+		Breakdown: breakdown, Consequences: cs, Areas: areas(f.Files, r),
+	}
+}
+
+// consequences gives each consequence in the facts, in their order, its floor
+// from the rules, copying its lists so the result aliases nothing. A class
+// with no floor gets the lowest level, so it is reported and raises nothing.
+// Nil when the facts carry none.
+func consequences(f facts.Facts, r Rules) []Consequence {
+	if len(f.Consequences) == 0 {
+		return nil
+	}
+	lowest := Level("")
+	if len(r.Levels) > 0 {
+		lowest = r.Levels[0].Level
+	}
+	out := make([]Consequence, 0, len(f.Consequences))
+	for _, c := range f.Consequences {
+		floor := lowest
+		for _, fl := range r.ConsequenceFloors {
+			if fl.Class == c.Class {
+				floor = fl.Level
+			}
+		}
+		out = append(out, Consequence{
+			Consequence: facts.Consequence{
+				Class: c.Class,
+				Paths: append([]string{}, c.Paths...),
+				Types: append([]string{}, c.Types...),
+			},
+			Floor: floor,
+		})
+	}
+	return out
+}
+
+// floored returns the highest-ranked level among l and each consequence's
+// floor, ranked by position in edges; a level not in edges never raises.
+func floored(l Level, cs []Consequence, edges []LevelEdge) Level {
+	rank := func(x Level) int {
+		for i, e := range edges {
+			if e.Level == x {
+				return i
+			}
+		}
+		return -1
+	}
+	for _, c := range cs {
+		if rank(c.Floor) > rank(l) {
+			l = c.Floor
+		}
+	}
+	return l
 }
 
 // counted splits files into those in none of the rules' excluded classes and

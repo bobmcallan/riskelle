@@ -44,7 +44,7 @@ var provenance = score.Provenance{
 // the bands does not churn the goldens. Fresh slices on every call.
 func estimateFixture() Report {
 	r := New(KindEstimate, score.Result{
-		Total: 7, Level: score.Low,
+		Total: 7, Level: score.Medium, // floored by identity_rights
 		Breakdown: []score.Point{
 			{Measure: score.MeasureSize, Fact: "lines", Value: 101, Min: 51, Points: 5,
 				From: []string{"core/calc.go", "ui/a&b<c>.js"}, Excluded: []string{"docs/guide.md"}},
@@ -52,6 +52,10 @@ func estimateFixture() Report {
 				From:       []string{"example.com/m/core", "ui/a&b<c>.js"},
 				Dependents: []facts.Dependency{{Name: "example.com/m/core", Dependents: 4}, {Name: "ui/a&b<c>.js", Dependents: 1}}},
 		},
+		Consequences: []score.Consequence{{
+			Consequence: facts.Consequence{Class: "identity_rights", Paths: []string{"iam/roles.tf"}, Types: []string{}},
+			Floor:       score.Medium,
+		}},
 		Areas: []score.Area{
 			{Name: "auth", Paths: []string{"internal/auth/login.go"}},
 			{Name: "payments", Paths: []string{"pay/card.go", "pay/refund.go"}},
@@ -131,7 +135,7 @@ func TestReportCarriesResult(t *testing.T) {
 	}
 	none := render(t, "json", noAreasFixture())
 	for _, s := range []string{`"kind": "score"`, `"base": "` + strings.Repeat("1", 40) + `"`,
-		`"head": "` + strings.Repeat("2", 40) + `"`, `"areas": []`, `"note": "` + Note} {
+		`"head": "` + strings.Repeat("2", 40) + `"`, `"areas": []`, `"consequences": []`, `"note": "` + Note} {
 		if !bytes.Contains(none, []byte(s)) {
 			t.Errorf("no-areas JSON lacks %s:\n%s", s, none)
 		}
@@ -160,6 +164,44 @@ func TestCode(t *testing.T) {
 	} {
 		if got := code(in); got != want {
 			t.Errorf("code(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// TestMarkdownListsConsequences pins the consequences section: shown with its
+// note, one line per class, only when there is one.
+func TestMarkdownListsConsequences(t *testing.T) {
+	md := string(render(t, "markdown", estimateFixture()))
+	for _, want := range []string{"### " + FloorHeading, FloorNote,
+		"- identity_rights, floor Medium: paths `iam/roles.tf`; types none (planned)"} {
+		if !strings.Contains(md, want) {
+			t.Errorf("markdown lacks %q:\n%s", want, md)
+		}
+	}
+	if none := string(render(t, "markdown", noAreasFixture())); strings.Contains(none, FloorHeading) {
+		t.Errorf("markdown with no consequence has the section:\n%s", none)
+	}
+}
+
+// TestReadmeDocumentsReportConsequences pins the README's Report section to
+// the consequences key and the Markdown heading.
+func TestReadmeDocumentsReportConsequences(t *testing.T) {
+	data, err := os.ReadFile("../../README.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(data)
+	i := strings.Index(s, "\n### Report\n")
+	if i < 0 {
+		t.Fatal("README has no ### Report section")
+	}
+	s = s[i+len("\n### Report\n"):]
+	if j := strings.Index(s, "\n#"); j >= 0 {
+		s = s[:j]
+	}
+	for _, want := range []string{"`\"consequences\"`", FloorHeading} {
+		if !strings.Contains(s, want) {
+			t.Errorf("README Report section lacks %s", want)
 		}
 	}
 }
