@@ -99,8 +99,13 @@ consequence in them.
 
 | Class | Floor | Terraform types (globs) |
 | --- | --- | --- |
-| `identity_rights` | Medium | `aws_iam_*`, `azuread_app_role_assignment`, `azuread_application*`, `azuread_directory_role*`, `azuread_service_principal*`, `azurerm_federated_identity_credential`, `azurerm_role_assignment`, `azurerm_role_definition`, `azurerm_user_assigned_identity`, `google_*_iam_*` |
+| `identity_rights` | Medium | `aws_iam_*`, `azuread_app_role_assignment`, `azuread_application*`, `azuread_directory_role*`, `azuread_service_principal*`, `azuredevops_*_permissions`, `azuredevops_branch_policy_*`, `azuredevops_check_*`, `azuredevops_environment*`, `azuredevops_group_membership`, `azuredevops_pipeline_authorization`, `azuredevops_resource_authorization`, `azuredevops_securityrole_assignment`, `azuredevops_serviceendpoint_*`, `azurerm_federated_identity_credential`, `azurerm_role_assignment`, `azurerm_role_definition`, `azurerm_user_assigned_identity`, `github_actions_*_oidc_subject_claim_customization_template`, `github_actions_*_permissions`, `github_actions_environment_*`, `github_branch_protection*`, `github_organization_ruleset`, `github_repository_collaborator*`, `github_repository_environment*`, `github_repository_ruleset`, `github_team_members`, `github_team_membership`, `github_team_repository`, `google_*_iam_*` |
 
+- Delivery rights count as identity and rights: Azure DevOps and GitHub service
+  connections and their authorisations, deployment environments and their
+  checks, branch policies and protections, and permissions decide who can act
+  as a deploy identity. Generic secrets and variables
+  (`github_actions_secret`, `azuredevops_variable_group`) do not.
 - Only `.tf` files are read, and in them only `resource` and `data` blocks of a
   catalogued type. A mention of a type in any other file never counts.
 - A block carries its class when any line in it is added, removed or altered:

@@ -29,6 +29,11 @@ type Consequence struct {
 // globs over Terraform resource and data types that carry it. Sorted by class
 // and versioned with each release, beside builtin (classes.go) and
 // builtinAreas (areas.go).
+//
+// identity_rights includes delivery rights: service connections and their
+// authorisations, deployment environments and their checks, branch policies
+// and protections, and permissions decide who can act as a deploy identity,
+// as a federated credential does. Generic secret and variable stores do not.
 var builtinConsequences = []struct {
 	class    string
 	patterns []string
@@ -39,10 +44,30 @@ var builtinConsequences = []struct {
 		"azuread_application*",
 		"azuread_directory_role*",
 		"azuread_service_principal*",
+		"azuredevops_*_permissions",
+		"azuredevops_branch_policy_*",
+		"azuredevops_check_*",
+		"azuredevops_environment*",
+		"azuredevops_group_membership",
+		"azuredevops_pipeline_authorization",
+		"azuredevops_resource_authorization",
+		"azuredevops_securityrole_assignment",
+		"azuredevops_serviceendpoint_*",
 		"azurerm_federated_identity_credential",
 		"azurerm_role_assignment",
 		"azurerm_role_definition",
 		"azurerm_user_assigned_identity",
+		"github_actions_*_oidc_subject_claim_customization_template",
+		"github_actions_*_permissions",
+		"github_actions_environment_*",
+		"github_branch_protection*",
+		"github_organization_ruleset",
+		"github_repository_collaborator*",
+		"github_repository_environment*",
+		"github_repository_ruleset",
+		"github_team_members",
+		"github_team_membership",
+		"github_team_repository",
 		"google_*_iam_*",
 	}},
 }

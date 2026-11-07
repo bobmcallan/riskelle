@@ -76,12 +76,36 @@ func TestIdentityRightsCatalog(t *testing.T) {
 		"azurerm_federated_identity_credential", "azurerm_role_assignment",
 		"azurerm_role_definition", "azurerm_user_assigned_identity",
 		"google_project_iam_member", "google_storage_bucket_iam_binding",
+		// delivery rights: Azure DevOps
+		"azuredevops_serviceendpoint_azurerm", "azuredevops_serviceendpoint_github", "azuredevops_serviceendpoint_permissions",
+		"azuredevops_pipeline_authorization", "azuredevops_resource_authorization",
+		"azuredevops_check_approval", "azuredevops_check_exclusive_lock", "azuredevops_check_required_template",
+		"azuredevops_check_branch_control", "azuredevops_check_business_hours",
+		"azuredevops_environment", "azuredevops_environment_resource_kubernetes",
+		"azuredevops_branch_policy_min_reviewers", "azuredevops_branch_policy_build_validation",
+		"azuredevops_git_permissions", "azuredevops_project_permissions", "azuredevops_build_definition_permissions",
+		"azuredevops_group_membership", "azuredevops_securityrole_assignment",
+		// delivery rights: GitHub
+		"github_actions_environment_secret", "github_actions_environment_variable",
+		"github_repository_environment", "github_repository_environment_deployment_policy",
+		"github_branch_protection", "github_branch_protection_v3",
+		"github_repository_ruleset", "github_organization_ruleset",
+		"github_repository_collaborator", "github_repository_collaborators",
+		"github_team_repository", "github_team_membership", "github_team_members",
+		"github_actions_repository_permissions", "github_actions_organization_permissions",
+		"github_actions_repository_oidc_subject_claim_customization_template",
+		"github_actions_organization_oidc_subject_claim_customization_template",
 	} {
 		if got := consequencesOf(typ); !reflect.DeepEqual(got, []string{ConsequenceIdentityRights}) {
 			t.Errorf("consequencesOf(%q) = %v, want [identity_rights]", typ, got)
 		}
 	}
-	for _, typ := range []string{"azurerm_storage_account", "azuread_group", "google_iam_workload_identity_pool", "aws_s3_bucket", ""} {
+	for _, typ := range []string{"azurerm_storage_account", "azuread_group", "google_iam_workload_identity_pool", "aws_s3_bucket", "",
+		"azuredevops_git_repository", "azuredevops_project", "azuredevops_build_definition", "azuredevops_variable_group",
+		"github_repository", "github_repository_file", "github_team", "github_actions_secret", "github_actions_variable",
+		// not a provider type: pins the literal customization_template suffix
+		"github_actions_repository_oidc_subject_claim_customize_template",
+	} {
 		if got := consequencesOf(typ); got != nil {
 			t.Errorf("consequencesOf(%q) = %v, want none", typ, got)
 		}
