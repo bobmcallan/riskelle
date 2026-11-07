@@ -52,7 +52,7 @@ share of their changes that are low risk, so the score must be:
 | Degree | How much *existing* code is altered, against code in new files (tests are left out, as for size, and by default so are non-code files and run records) |
 | Impact | How many places depend on what changed (for Go, packages importing a changed package; otherwise files referencing a changed file) |
 | Branch age | Days from the branch's first commit to merge, and how far the trunk moved meanwhile |
-| Tests | Production files changed without their paired test (see [Tests and their pairs](#tests-and-their-pairs)); a Shell or Terraform file counts only when no test changed and the repo holds a test in its language (see [Files with no pairing](#files-with-no-pairing)); any other file with no pairing convention counts only when no test changed at all |
+| Tests | Production code files changed without their paired test (see [Tests and their pairs](#tests-and-their-pairs)); a Shell or Terraform file counts only when no test changed and the repo holds a test in its language; any other file (YAML, JSON, XML, other config or data, an extensionless file) is not code and never counts (see [Which files count](#which-files-count)) |
 
 A file is generated when its path matches a built-in or repo-added generated
 pattern, or when its header carries a marker. The header is the comment lines
@@ -188,10 +188,16 @@ with it. The rules are owned by `internal/facts/pairs.go`; for a file `x`:
   `tests/` files are named by feature. A `.bats` file has no fixed subject.
   C/C++ headers (`.h`, `.hpp`) are not paired either.
 - A Shell script test names its script (`scripts/plan-guard-test` tests
-  `scripts/plan-guard`), but scripts are still scored by the no-pairing rule
-  below: any changed test, a script test included, covers them.
+  `scripts/plan-guard`), but an extensionless script names no language and
+  never counts as untested. A `.sh` or `.bash` script is scored by the Shell
+  rule below.
 
-#### Files with no pairing
+#### Which files count
+
+- A file in a paired language (the table above) counts as untested unless its
+  test changed.
+- A Shell or Terraform file counts under the rule and table that follow.
+- Every other file never counts.
 
 A Shell or Terraform file cannot be paired with one test, so it is judged by
 whether the repo can test it at all. It counts as untested only when no test
@@ -209,10 +215,12 @@ change would be the only way down, which buys no safety.
 - A Shell script test (`x-test`, `x_test`, `test-x`), extensionless included,
   counts as a Shell test, so a repo of extensionless scripts with their tests
   holds Shell tests.
-- Any other file with no pairing convention (config, Rust, C/C++ headers) keeps
-  the plain rule: it counts as untested when no test changed at all. An
-  extensionless file (a script, a `Makefile`, a `Dockerfile`) names no language,
-  so it keeps the plain rule too.
+- Any other file is not code that riskelle can test: YAML (pipelines included),
+  JSON, XML, TOML, other config and data, extensionless files (scripts, a
+  `Makefile`, a `Dockerfile`, data files), and languages with no row above
+  (Rust, C/C++ headers). It never counts as untested. It still counts for
+  size, spread and degree; what it touches is the consequence axis's concern
+  (see [Consequences](#consequences)).
 - The facts carry the languages found as `"test_languages"`, read from the
   head tree. A change cannot lower its own count: deleting a repo's tests is a
   test change, and adding one only raises the count.
@@ -266,7 +274,7 @@ a JSON plan file that predicts the change:
   expected to carry, such as `{"path": "iam/roles.tf", "added": 20,
   "consequences": ["identity_rights"]}`; see [Consequences](#consequences). An
   unknown class, or one listed twice for a path, is refused by name.
-- Which languages have tests (see [Files with no pairing](#files-with-no-pairing))
+- Which languages have tests (see [Which files count](#which-files-count))
   is read from the target's tree plus the planned paths; the plan file has no
   field for it.
 
@@ -392,9 +400,10 @@ The exclusion toggles in `.risk/rules.json`:
   config, config formats, data, and agent and harness config.
 - `exclude_log_files` covers the run-record catalog (see
   [Run records](#run-records)): logs, plan output and state snapshots.
-- Both are `true` by default: those files then leave size, degree and
-  untested, and always count for spread.
-- Setting one to `false` counts those files, so it can only add risk. `true`
+- Both are `true` by default: those files then leave size and degree, and
+  always count for spread. Being non-code, they never count as untested.
+- Setting one to `false` counts those files for size and degree, so it can
+  only add risk. `true`
   is accepted as the default; any other value is refused by name.
 - There is no toggle for test files: test lines never count toward size or
   degree.

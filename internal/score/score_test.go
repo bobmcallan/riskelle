@@ -110,8 +110,9 @@ func TestBands(t *testing.T) {
 			case "trunk_commits":
 				f.TrunkCommits = tt.value
 			case "untested_production_files":
+				// A paired language with no test, so each file counts.
 				for _, p := range names("f", tt.value) {
-					f.Files = append(f.Files, facts.File{Path: p})
+					f.Files = append(f.Files, facts.File{Path: p + ".go"})
 				}
 			}
 			p := entry(t, Score(f, Default()), tt.measure, tt.fact)
@@ -452,7 +453,7 @@ func TestTestsMeasure(t *testing.T) {
 		{"extension must match", []facts.File{prod("a.ts"), of("a.test.js", facts.ClassTest)}, 1, 10, []string{"a.ts"}},
 		{"marker-less test pairs by its own name", []facts.File{prod("app.js"), of("__tests__/app.js", facts.ClassTest)}, 0, 0, []string{}},
 		{"no convention, with a test", []facts.File{prod("deploy.yaml"), of("x_test.go", facts.ClassTest)}, 0, 0, []string{}},
-		{"no convention, no test", []facts.File{prod("deploy.yaml")}, 1, 10, []string{"deploy.yaml"}},
+		{"not code, no test", []facts.File{prod("deploy.yaml")}, 0, 0, []string{}},
 		{"mixed", []facts.File{prod("a.go"), prod("deploy.yaml"), of("b_test.go", facts.ClassTest)}, 1, 10, []string{"a.go"}},
 		{"deleted with its deleted test", []facts.File{{Path: "old.go", Removed: 9}, {Path: "old_test.go", Removed: 4, Classes: []facts.Class{facts.ClassTest}}}, 0, 0, []string{}},
 		{"production and an unpaired snapshot", []facts.File{prod("app.js"), of("__snapshots__/a.snap", facts.ClassGenerated, facts.ClassTest)}, 1, 10, []string{"app.js"}},

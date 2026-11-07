@@ -51,7 +51,7 @@ type Rules struct {
 	DegreeExisting     Bands `json:"degree_existing_lines"` // lines added and removed in files that existed at the merge base
 	BranchAgeDays      Bands `json:"branch_age_days"`
 	BranchTrunkCommits Bands `json:"branch_trunk_commits"`
-	TestsUntested      Bands `json:"tests_untested"` // production files changed without their paired test (or, with no pairing convention, with no test change)
+	TestsUntested      Bands `json:"tests_untested"` // production code files (a paired or unpaired language) changed without their test
 
 	ImpactExcludes   []facts.Class `json:"impact_excludes"` // classes of changed files impact leaves out
 	ImpactDependents Bands         `json:"impact_dependents"`

@@ -89,7 +89,7 @@ func TestAreasNeverScore(t *testing.T) {
 
 	// (b) Two changes alike but for landing in sensitive areas score alike.
 	in := facts.Facts{
-		Files:       []facts.File{{Path: "internal/auth/login.go", Added: 300, Removed: 40}, {Path: "db/migrations/1.sql", Added: 90}},
+		Files:       []facts.File{{Path: "internal/auth/login.go", Added: 300, Removed: 40}, {Path: "db/migrations/1.go", Added: 90}},
 		Directories: []string{"db/migrations", "internal/auth"},
 		Projects:    []string{"."},
 	}

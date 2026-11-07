@@ -120,8 +120,8 @@ func untestedPoint(t *testing.T, out string) score.Point {
 // TestShellScriptTestConvention drives the built binary over a change modelled
 // on a real one: an extensionless script and its extensionless -test script
 // changed together score no untested file, from score and estimate; a script
-// changed alone, in a repo with script tests, counts; a Makefile keeps the
-// plain rule.
+// changed alone, in a repo with script tests, counts only as a .sh file: an
+// extensionless script or a Makefile names no language and never counts.
 func TestShellScriptTestConvention(t *testing.T) {
 	bin := buildRiskelle(t, t.TempDir())
 	score := func(t *testing.T, dir string) string {
@@ -167,11 +167,11 @@ func TestShellScriptTestConvention(t *testing.T) {
 		want  []string
 	}{
 		{"script alone, script tests in repo", map[string]string{"scripts/plan-guard-test": "true\n", "scripts/plan-guard": "a\n"},
-			map[string]string{"scripts/plan-guard": "b\n"}, []string{"scripts/plan-guard"}},
+			map[string]string{"scripts/plan-guard": "b\n"}, []string{}},
 		{".sh alone, extensionless script tests in repo", map[string]string{"scripts/plan-guard-test": "true\n"},
 			map[string]string{"scripts/run.sh": "echo\n"}, []string{"scripts/run.sh"}},
 		{"Makefile alone", map[string]string{"README.md": "# fixture\n"},
-			map[string]string{"Makefile": "all:\n"}, []string{"Makefile"}},
+			map[string]string{"Makefile": "all:\n"}, []string{}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			p := untestedPoint(t, score(t, rulesFixture(t, tt.base, tt.topic)))
@@ -180,4 +180,66 @@ func TestShellScriptTestConvention(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestDataFilesAreNeverUntested drives the built binary over a change modelled
+// on a real one: a release pipeline's YAML and an extensionless data file,
+// both edited with no test, add no untested points from score or estimate,
+// though they still count for size; a Go file beside them still counts.
+func TestDataFilesAreNeverUntested(t *testing.T) {
+	bin := buildRiskelle(t, t.TempDir())
+	base := map[string]string{"README.md": "# fixture\n", "pipelines/release.yml": numbered("# ", 20), "release-roots": "a\n"}
+	topic := map[string]string{"pipelines/release.yml": numbered("# ", 45), "release-roots": "a\nb\nc\n"}
+	run := func(t *testing.T, dir string) report.Report {
+		t.Helper()
+		code, out, stderr := runScore(t, bin, dir, "--base", "main", "--head", "topic")
+		if code != 0 {
+			t.Fatalf("score exit %d: %s", code, stderr)
+		}
+		var r report.Report
+		if err := json.Unmarshal([]byte(out), &r); err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+	point := func(r report.Report, fact string) score.Point {
+		for _, p := range r.Breakdown {
+			if p.Fact == fact {
+				return p
+			}
+		}
+		return score.Point{}
+	}
+
+	t.Run("pipeline YAML and a data file", func(t *testing.T) {
+		dir := rulesFixture(t, base, topic)
+		r := run(t, dir)
+		if p := point(r, "untested_production_files"); p.Value != 0 || p.Points != 0 || len(p.From) != 0 {
+			t.Errorf("untested = %+v, want 0", p)
+		}
+		if p := point(r, "lines"); !reflect.DeepEqual(p.From, []string{"pipelines/release.yml", "release-roots"}) {
+			t.Errorf("size from %v, want both files", p.From)
+		}
+		plan := filepath.Join(t.TempDir(), "plan.json")
+		os.WriteFile(plan, []byte(`{"target":"main","files":[`+
+			`{"path":"pipelines/release.yml","added":25},{"path":"release-roots","added":2}]}`), 0o644)
+		code, eout, stderr := runEstimate(t, bin, dir, plan)
+		if code != 0 {
+			t.Fatalf("estimate exit %d: %s", code, stderr)
+		}
+		if p := untestedPoint(t, eout); p.Value != 0 {
+			t.Errorf("estimate untested = %+v, want 0", p)
+		}
+	})
+
+	t.Run("with a Go file", func(t *testing.T) {
+		withGo := map[string]string{"src/app.go": "package src\n"}
+		for k, v := range topic {
+			withGo[k] = v
+		}
+		r := run(t, rulesFixture(t, base, withGo))
+		if p := point(r, "untested_production_files"); p.Points != 10 || !reflect.DeepEqual(p.From, []string{"src/app.go"}) {
+			t.Errorf("untested = %+v, want 10 points from [src/app.go]", p)
+		}
+	})
 }

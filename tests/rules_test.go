@@ -156,8 +156,9 @@ func TestRulesLoweringSettingRefused(t *testing.T) {
 
 // TestRulesExclusionToggles: a change adds 30 lines to code, 20 to a log and
 // 15 to a TOML config. By default, and with both toggles true, the log and the
-// config leave size, degree and untested but count for spread; a toggle set
-// to false counts its files, which never lowers the total. The report
+// config leave size and degree but count for spread; a toggle set to false
+// counts its files for size and degree, which never lowers the total. Being
+// non-code, they never count as untested. The report
 // records each toggle's value with the rules hash.
 func TestRulesExclusionToggles(t *testing.T) {
 	all := []string{"config/app.toml", "run/app.log", "src/app.go"}
@@ -216,8 +217,8 @@ func TestRulesExclusionToggles(t *testing.T) {
 			if d := byFact["degree/existing_lines"]; d.Value != tt.size || !reflect.DeepEqual(d.From, tt.from) {
 				t.Errorf("degree = %d from %v, want %d from %v", d.Value, d.From, tt.size, tt.from)
 			}
-			if u := byFact["tests/untested_production_files"]; !reflect.DeepEqual(u.From, tt.from) {
-				t.Errorf("untested = %v, want %v", u.From, tt.from)
+			if u := byFact["tests/untested_production_files"]; !reflect.DeepEqual(u.From, []string{"src/app.go"}) {
+				t.Errorf("untested = %v, want [src/app.go]", u.From)
 			}
 			if s := byFact["spread/files"]; !reflect.DeepEqual(s.From, all) {
 				t.Errorf("spread files = %v, want %v", s.From, all)

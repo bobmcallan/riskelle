@@ -9,7 +9,8 @@ import (
 
 // TestUntestedUnpairedLanguages pins the rule for Shell and Terraform files:
 // with no test changed, one counts as untested only when the repo holds a test
-// in its language; files with a pairing convention score as before.
+// in its language; files with a pairing convention score as before; a file in
+// no known language (YAML, JSON, XML, data) never counts.
 func TestUntestedUnpairedLanguages(t *testing.T) {
 	prod := func(p string) facts.File { return facts.File{Path: p, Added: 5} }
 	test := func(p string) facts.File {
@@ -38,9 +39,12 @@ func TestUntestedUnpairedLanguages(t *testing.T) {
 		// AC4: a pairing convention is unaffected by langs
 		{"go, no langs", []facts.File{prod("main.go")}, []string{}, 1, 10, []string{"main.go"}},
 		{"go, shell langs", []facts.File{prod("main.go")}, []string{"Shell"}, 1, 10, []string{"main.go"}},
-		// any other unpaired file keeps the old rule
-		{"yaml, no langs", []facts.File{prod("deploy.yaml")}, []string{}, 1, 10, []string{"deploy.yaml"}},
-		{"shell and yaml", []facts.File{prod("a.sh"), prod("deploy.yaml")}, []string{}, 1, 10, []string{"deploy.yaml"}},
+		// a file in no known language never counts
+		{"yaml, no langs", []facts.File{prod("deploy.yaml")}, []string{}, 0, 0, []string{}},
+		{"shell and yaml", []facts.File{prod("a.sh"), prod("deploy.yaml")}, []string{}, 0, 0, []string{}},
+		{"data and config, no test", []facts.File{prod("deploy.yaml"), prod("config/app.json"), prod("build/app.xml"), prod("release-roots")},
+			[]string{"Shell", "Terraform"}, 0, 0, []string{}},
+		{"go and yaml, no test", []facts.File{prod("main.go"), prod("deploy.yaml")}, []string{}, 1, 10, []string{"main.go"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -54,7 +58,9 @@ func TestUntestedUnpairedLanguages(t *testing.T) {
 }
 
 // TestUntestedShellScriptTests scores script changes with classes taken from
-// facts.Classify, so classification and scoring are proved together.
+// facts.Classify, so classification and scoring are proved together. An
+// extensionless file (a script, a Makefile, a Dockerfile) names no language
+// and never counts as untested; a .sh script keeps the Shell rule.
 func TestUntestedShellScriptTests(t *testing.T) {
 	file := func(p string, added int) facts.File {
 		return facts.File{Path: p, Added: added, Classes: facts.Classify(p)}
@@ -68,10 +74,10 @@ func TestUntestedShellScriptTests(t *testing.T) {
 	}{
 		{"script with its test", []facts.File{file("scripts/plan-guard", 50), file("scripts/plan-guard-test", 30)}, []string{"Shell"}, 0, []string{}},
 		{"script with its test, no langs", []facts.File{file("scripts/plan-guard", 50), file("scripts/plan-guard-test", 30)}, []string{}, 0, []string{}},
-		{"extensionless script alone", []facts.File{file("scripts/plan-guard", 50)}, []string{"Shell"}, 1, []string{"scripts/plan-guard"}},
+		{"extensionless script alone", []facts.File{file("scripts/plan-guard", 50)}, []string{"Shell"}, 0, []string{}},
 		{".sh script alone", []facts.File{file("scripts/run.sh", 50)}, []string{"Shell"}, 1, []string{"scripts/run.sh"}},
-		{"Makefile alone", []facts.File{file("Makefile", 5)}, []string{}, 1, []string{"Makefile"}},
-		{"Dockerfile alone", []facts.File{file("Dockerfile", 5)}, []string{"Shell"}, 1, []string{"Dockerfile"}},
+		{"Makefile alone", []facts.File{file("Makefile", 5)}, []string{}, 0, []string{}},
+		{"Dockerfile alone", []facts.File{file("Dockerfile", 5)}, []string{"Shell"}, 0, []string{}},
 		{"Makefile with a script test", []facts.File{file("Makefile", 5), file("scripts/plan-guard-test", 3)}, []string{"Shell"}, 0, []string{}},
 	}
 	for _, tt := range tests {

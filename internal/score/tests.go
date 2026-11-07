@@ -7,19 +7,23 @@ import (
 	"github.com/bobmcallan/riskelle/internal/facts"
 )
 
-// untested scores production files changed without their paired test. A
+// untested scores production code files changed without their test. A
 // production file is a kept file (not docs, generated, lock or test); a test
-// change is any changed file classed test, whatever its other classes. A
-// production file whose extension has a pairing convention (facts.HasPairing)
-// is untested unless a changed test pairs with it: the test's subject
-// (facts.TestSubject) is the file's base name, in any directory. A production
-// file with no pairing convention is tested when any file at all is classed
-// test. Otherwise, a file in an unpaired language (facts.UnpairedLanguage:
-// Shell, Terraform) is untested only when langs, the unpaired languages with a
-// test in the head tree, holds its language: a repo with no tests in that
-// language has no way to write one. Any other file with no pairing is
-// untested. The value is the number of untested production files and From
-// lists them, sorted; with none, the value is 0 and From is empty.
+// change is any changed file classed test, whatever its other classes. Three
+// cases, by the file's language:
+//   - a paired language (facts.HasPairing) counts unless a changed test pairs
+//     with it: the test's subject (facts.TestSubject) is the file's base name,
+//     in any directory;
+//   - an unpaired language (facts.UnpairedLanguage: Shell, Terraform) is tested
+//     when any file at all is classed test, and otherwise counts only when
+//     langs, the unpaired languages with a test in the head tree, holds its
+//     language: a repo with no tests in that language has no way to write one;
+//   - any other file (YAML, JSON, XML, other config or data, an extensionless
+//     file, a language with no row) is not code riskelle can test and never
+//     counts.
+//
+// The value is the number of untested production files and From lists them,
+// sorted; with none, the value is 0 and From is empty.
 func untested(all, kept []facts.File, langs []string, r Rules) Point {
 	p := Point{Measure: MeasureTests, Fact: "untested_production_files", From: []string{}}
 	subjects, anyTest := testSubjects(all)
@@ -28,9 +32,7 @@ func untested(all, kept []facts.File, langs []string, r Rules) Point {
 			if subjects[path.Base(file.Path)] {
 				continue
 			}
-		} else if anyTest {
-			continue
-		} else if lang := facts.UnpairedLanguage(file.Path); lang != "" && !contains(langs, lang) {
+		} else if lang := facts.UnpairedLanguage(file.Path); lang == "" || anyTest || !contains(langs, lang) {
 			continue
 		}
 		p.From = append(p.From, file.Path)

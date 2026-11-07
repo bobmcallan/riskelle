@@ -114,8 +114,9 @@ func TestReadmeSizeAndDegreeLeaveOutTests(t *testing.T) {
 }
 
 // TestReadmeTestsRowDescribesPairing pins that the README's Measures table
-// says the tests measure counts production files changed without their
-// paired test.
+// says the tests measure counts production code files changed without their
+// paired test and names the non-code files that never count, and that the
+// section it links to exists under its anchor with no link to the old one.
 func TestReadmeTestsRowDescribesPairing(t *testing.T) {
 	readme, err := os.ReadFile("../README.md")
 	if err != nil {
@@ -125,13 +126,21 @@ func TestReadmeTestsRowDescribesPairing(t *testing.T) {
 	for _, line := range strings.Split(string(readme), "\n") {
 		if strings.HasPrefix(line, "| Tests |") {
 			found = true
-			if !strings.Contains(line, "paired test") {
-				t.Errorf("README Tests row does not describe the paired rule: %s", line)
+			for _, want := range []string{"paired test", "never counts", "YAML", "JSON", "XML", "extensionless", "(#which-files-count)"} {
+				if !strings.Contains(line, want) {
+					t.Errorf("README Tests row lacks %q: %s", want, line)
+				}
 			}
 		}
 	}
 	if !found {
 		t.Error("README has no row starting \"| Tests |\"")
+	}
+	if !strings.Contains(string(readme), "\n#### Which files count\n") {
+		t.Error("README has no #### Which files count section")
+	}
+	if strings.Contains(string(readme), "(#files-with-no-pairing)") {
+		t.Error("README still links to #files-with-no-pairing")
 	}
 }
 
