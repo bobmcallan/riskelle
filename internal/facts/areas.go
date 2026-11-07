@@ -33,6 +33,8 @@ var builtinAreas = []struct {
 		"**/docker-compose*.yml", "**/docker-compose*.yaml",
 		// CI and delivery pipelines
 		".github/workflows/**", "azure-pipelines*.yml", "azure-pipelines*.yaml", ".azuredevops/**",
+		"pipelines/**/*.yml", "pipelines/**/*.yaml", ".pipelines/**/*.yml", ".pipelines/**/*.yaml",
+		".circleci/**", ".buildkite/**",
 	}},
 	{AreaMigrations, []string{
 		"**/migrations/**", "**/Migrations/**", "**/migrate/**", "**/*.sql",

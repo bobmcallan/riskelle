@@ -68,7 +68,7 @@ floor; it never changes the total.
 
 Where a change lands (auth, migrations, infrastructure, secrets) is shown on the
 report as context for reviewers, but does not count towards the score: it is the
-area's risk, not the developer's.
+area's risk, not the developer's (see [Sensitive areas](#sensitive-areas)).
 
 ### Consequences
 
@@ -440,6 +440,24 @@ characters but `/`, and `?` one such character.
 
 Tenant and other snapshots have no shared naming convention, so they are not in
 the built-in catalog.
+
+### Sensitive areas
+
+The built-in sensitive areas are owned by `internal/facts/areas.go` and use the
+same glob syntax as run records. A change that lands in one is shown on the
+report as reviewer context and never scores. `areas` in `.risk/rules.json`
+adds patterns or areas; it never replaces the built-in ones.
+
+| Area | Patterns |
+| --- | --- |
+| auth | `**/auth/**`, `**/oauth/**`, `**/*Auth*/**`, `**/*Auth*.cs`, `**/auth.*`, `**/auth_*`, `**/*_auth.*`, `**/identity/**`, `**/*Identity*/**`, `**/jwt*`, `**/*Jwt*`, `**/*Token*.cs` |
+| infrastructure | `**/*.tf`, `**/*.tfvars`, `**/*.bicep`, `**/*.bicepparam`, `**/azuredeploy*.json`, `**/terraform/**`, `**/infra/**`, `**/infrastructure/**`, `**/k8s/**`, `**/kubernetes/**`, `**/helm/**`, `**/Dockerfile`, `**/Dockerfile.*`, `**/*.dockerfile`, `**/docker-compose*.yml`, `**/docker-compose*.yaml`, `.github/workflows/**`, `azure-pipelines*.yml`, `azure-pipelines*.yaml`, `.azuredevops/**`, `pipelines/**/*.yml`, `pipelines/**/*.yaml`, `.pipelines/**/*.yml`, `.pipelines/**/*.yaml`, `.circleci/**`, `.buildkite/**` |
+| migrations | `**/migrations/**`, `**/Migrations/**`, `**/migrate/**`, `**/*.sql` |
+| secrets | `**/*secret*`, `**/*Secret*`, `**/*secret*/**`, `**/*Secret*/**`, `**/*.pem`, `**/*.key`, `**/*.pfx`, `**/*.p12`, `**/*.jks`, `**/*.keystore`, `**/id_rsa*`, `**/id_ed25519*`, `**/.env`, `**/.env.*`, `**/crypto/**`, `**/*Crypto*`, `**/*Encrypt*` |
+
+`pipelines/` and `.pipelines/` count only their YAML (pipeline definitions), as
+"pipelines" is an ordinary directory name; `.circleci/` and `.buildkite/` are
+CI-only, so the whole directory counts.
 
 ## Where it runs
 

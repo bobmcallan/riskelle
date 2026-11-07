@@ -120,3 +120,30 @@ func TestAreasNeverScore(t *testing.T) {
 		}
 	}
 }
+
+// TestPipelineAreaNeverScores pins that a pipeline YAML landing in the
+// infrastructure area scores exactly as the same change elsewhere.
+func TestPipelineAreaNeverScores(t *testing.T) {
+	change := func(p string) facts.Facts {
+		return facts.Facts{
+			Files:       []facts.File{{Path: p, Added: 40, Removed: 5}},
+			Directories: []string{"."}, Projects: []string{"."},
+		}
+	}
+	in, out := Score(change("pipelines/release.yml"), Default()), Score(change("deploy/release.yml"), Default())
+	if want := []Area{{Name: "infrastructure", Paths: []string{"pipelines/release.yml"}}}; !reflect.DeepEqual(in.Areas, want) {
+		t.Errorf("areas = %+v, want %+v", in.Areas, want)
+	}
+	if out.Areas != nil {
+		t.Errorf("areas = %+v, want none", out.Areas)
+	}
+	if in.Total != out.Total || in.Level != out.Level || len(in.Breakdown) != len(out.Breakdown) {
+		t.Fatalf("totals %d %s vs %d %s", in.Total, in.Level, out.Total, out.Level)
+	}
+	for i := range in.Breakdown {
+		a, b := in.Breakdown[i], out.Breakdown[i]
+		if a.Measure != b.Measure || a.Fact != b.Fact || a.Value != b.Value || a.Points != b.Points {
+			t.Errorf("breakdown %d: %+v vs %+v", i, a, b)
+		}
+	}
+}
