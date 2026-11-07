@@ -1,0 +1,195 @@
+//go:build integration
+
+package tests
+
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"reflect"
+	"strings"
+	"testing"
+
+	"github.com/bobmcallan/riskelle/internal/report"
+	"github.com/bobmcallan/riskelle/internal/score"
+)
+
+// releaseYML models a release pipeline that runs as a deploy identity: a
+// deployment job to the prod environment with an Azure CLI step on a service
+// connection.
+const releaseYML = `trigger: none
+
+pool:
+  vmImage: ubuntu-latest
+
+stages:
+- stage: Release
+  jobs:
+  - deployment: DeployGraph
+    environment: prod
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - checkout: self
+          - task: AzureCLI@2
+            displayName: Apply
+            inputs:
+              azureSubscription: graph-deploy
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |
+                set -euo pipefail
+                ./scripts/apply.sh
+`
+
+// buildYML is an Azure pipeline whose list job has a variable named
+// environment: not a deployment environment.
+const buildYML = `trigger:
+- main
+
+jobs:
+- job: Build
+  variables:
+    environment: dev
+  steps:
+  - script: make
+`
+
+// workflowYML is a GitHub workflow with a deployment environment and an OIDC
+// token grant.
+const workflowYML = `on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: prod
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+    - uses: actions/checkout@v4
+`
+
+const composeYML = `services:
+  app:
+    image: app
+    environment:
+      - MODE=dev
+`
+
+// TestPipelineIdentityFloorsTheLevel drives the built binary over a change
+// modelled on a real one: a release pipeline that names a service connection
+// and a deployment environment is Low by shape and reported Medium, or High
+// under a production root; a GitHub workflow with an environment and an OIDC
+// grant is Medium; removing the connection is Medium; a script change, a
+// variable named environment and a compose environment carry nothing;
+// estimate with a plan naming the class agrees.
+func TestPipelineIdentityFloorsTheLevel(t *testing.T) {
+	bin := buildRiskelle(t, t.TempDir())
+	run := func(t *testing.T, dir string, args ...string) string {
+		t.Helper()
+		code, out, stderr := runScore(t, bin, dir, append([]string{"--base", "main", "--head", "topic"}, args...)...)
+		if code != 0 {
+			t.Fatalf("score exit %d: %s", code, stderr)
+		}
+		return out
+	}
+	consequences := func(t *testing.T, r report.Report, want string) {
+		t.Helper()
+		if b, _ := json.Marshal(r.Consequences); string(b) != want {
+			t.Errorf("consequences = %s\nwant %s", b, want)
+		}
+	}
+	base := map[string]string{"README.md": "# fixture\n"}
+	release := `[{"class":"pipeline_identity","paths":["pipelines/release.yml"],"types":["azureSubscription","environment"],"floor":"Medium"}]`
+
+	t.Run("824decc", func(t *testing.T) {
+		dir := rulesFixture(t, base, map[string]string{"pipelines/release.yml": releaseYML})
+		got := decodeReport(t, run(t, dir))
+		n := 0
+		for _, p := range got.Breakdown {
+			n += p.Points
+		}
+		if got.Total != n || got.Total >= 10 || got.ShapeLevel != score.Low || got.Level != score.Medium ||
+			!reflect.DeepEqual(got.FlooredBy, []string{"pipeline_identity"}) {
+			t.Errorf("total %d (sum %d) shape %s level %s floored_by %v, want a Low total under 10 floored Medium by pipeline_identity",
+				got.Total, n, got.ShapeLevel, got.Level, got.FlooredBy)
+		}
+		consequences(t, got, release)
+		md := run(t, dir, "--format", "markdown")
+		for _, w := range []string{"- pipeline_identity, floor Medium: paths `pipelines/release.yml`; types `azureSubscription`, `environment`", report.SplitNote} {
+			if !strings.Contains(md, w) {
+				t.Errorf("markdown lacks %q:\n%s", w, md)
+			}
+		}
+
+		for _, tt := range []struct {
+			name, consequences string
+			level              score.Level
+		}{
+			{"plan naming the class", `,"consequences":["pipeline_identity"]`, score.Medium},
+			{"plan naming none", ``, score.Low},
+		} {
+			plan := filepath.Join(t.TempDir(), "plan.json")
+			os.WriteFile(plan, []byte(`{"target":"main","files":[{"path":"pipelines/release.yml","added":40`+tt.consequences+`}]}`), 0o644)
+			code, out, stderr := runEstimate(t, bin, dir, plan)
+			if code != 0 {
+				t.Fatalf("%s: estimate exit %d: %s", tt.name, code, stderr)
+			}
+			est := decodeReport(t, out)
+			if est.Level != tt.level {
+				t.Errorf("%s: estimate level %s, want %s", tt.name, est.Level, tt.level)
+			}
+			if tt.level == score.Medium && (!reflect.DeepEqual(est.FlooredBy, []string{"pipeline_identity"}) ||
+				!strings.Contains(out, `"types": []`)) {
+				t.Errorf("%s: estimate floored_by %v:\n%s", tt.name, est.FlooredBy, out)
+			}
+		}
+	})
+
+	t.Run("under a production root", func(t *testing.T) {
+		b := map[string]string{"README.md": "# fixture\n", ".risk/rules.json": `{"production_roots":["pipelines/**"]}`}
+		got := decodeReport(t, run(t, rulesFixture(t, b, map[string]string{"pipelines/release.yml": releaseYML})))
+		if got.Level != score.High {
+			t.Errorf("level %s, want High", got.Level)
+		}
+		consequences(t, got, `[{"class":"pipeline_identity","paths":["pipelines/release.yml"],"types":["azureSubscription","environment"],`+
+			`"floor":"High","production_roots":["pipelines/**"]}]`)
+	})
+
+	t.Run("GitHub workflow", func(t *testing.T) {
+		got := decodeReport(t, run(t, rulesFixture(t, base, map[string]string{".github/workflows/deploy.yml": workflowYML})))
+		if got.Level != score.Medium {
+			t.Errorf("level %s, want Medium", got.Level)
+		}
+		consequences(t, got, `[{"class":"pipeline_identity","paths":[".github/workflows/deploy.yml"],"types":["environment","id-token: write"],"floor":"Medium"}]`)
+	})
+
+	withRelease := map[string]string{"pipelines/release.yml": releaseYML, "pipelines/build.yml": buildYML,
+		"docker-compose.yml": composeYML, "pipelines/docker-compose.test.yml": composeYML}
+
+	t.Run("removed service connection", func(t *testing.T) {
+		removed := strings.Replace(releaseYML, "              azureSubscription: graph-deploy\n", "", 1)
+		got := decodeReport(t, run(t, rulesFixture(t, withRelease, map[string]string{"pipelines/release.yml": removed})))
+		if got.Level != score.Medium {
+			t.Errorf("level %s, want Medium", got.Level)
+		}
+		consequences(t, got, `[{"class":"pipeline_identity","paths":["pipelines/release.yml"],"types":["azureSubscription"],"floor":"Medium"}]`)
+	})
+
+	t.Run("names neither", func(t *testing.T) {
+		out := run(t, rulesFixture(t, withRelease, map[string]string{
+			"pipelines/release.yml":             strings.Replace(releaseYML, "./scripts/apply.sh", "./scripts/apply.sh --plan", 1),
+			"pipelines/build.yml":               strings.Replace(buildYML, "environment: dev", "environment: test", 1),
+			"docker-compose.yml":                strings.Replace(composeYML, "MODE=dev", "MODE=test", 1),
+			"pipelines/docker-compose.test.yml": strings.Replace(composeYML, "MODE=dev", "MODE=ci", 1),
+		}))
+		got := decodeReport(t, out)
+		if got.Level != score.Low || !strings.Contains(out, `"consequences": []`) || !strings.Contains(out, `"floored_by": []`) {
+			t.Errorf("level %s consequences %+v, want Low and none:\n%s", got.Level, got.Consequences, out)
+		}
+	})
+}

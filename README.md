@@ -76,7 +76,7 @@ A consequence is what a change *does*, read from its changed lines, not where
 it lands. riskelle finds each consequence class in a built-in, versioned
 catalog, mechanically and the same way every time, and records it in the facts
 as `"consequences"`: the class, the paths that triggered it and the block types
-that did.
+or pipeline keys that did.
 
 Each class sets a **floor**: the reported level is the higher of the total's
 own level and every consequence's floor. A floor never changes the total or any
@@ -97,17 +97,19 @@ roots. The total is unchanged. Roots are read from the target branch like every
 rule, recorded in the rules hash, and change nothing for a change with no
 consequence in them.
 
-| Class | Floor | Terraform types (globs) |
+| Class | Floor | Read from |
 | --- | --- | --- |
-| `identity_rights` | Medium | `aws_iam_*`, `azuread_app_role_assignment`, `azuread_application*`, `azuread_directory_role*`, `azuread_service_principal*`, `azuredevops_*_permissions`, `azuredevops_branch_policy_*`, `azuredevops_check_*`, `azuredevops_environment*`, `azuredevops_group_membership`, `azuredevops_pipeline_authorization`, `azuredevops_resource_authorization`, `azuredevops_securityrole_assignment`, `azuredevops_serviceendpoint_*`, `azurerm_federated_identity_credential`, `azurerm_role_assignment`, `azurerm_role_definition`, `azurerm_user_assigned_identity`, `github_actions_*_oidc_subject_claim_customization_template`, `github_actions_*_permissions`, `github_actions_environment_*`, `github_branch_protection*`, `github_organization_ruleset`, `github_repository_collaborator*`, `github_repository_environment*`, `github_repository_ruleset`, `github_team_members`, `github_team_membership`, `github_team_repository`, `google_*_iam_*` |
+| `identity_rights` | Medium | `aws_iam_*`, `azuread_app_role_assignment`, `azuread_application*`, `azuread_directory_role*`, `azuread_service_principal*`, `azuredevops_*_permissions`, `azuredevops_branch_policy_*`, `azuredevops_check_*`, `azuredevops_environment*`, `azuredevops_group_membership`, `azuredevops_pipeline_authorization`, `azuredevops_resource_authorization`, `azuredevops_securityrole_assignment`, `azuredevops_serviceendpoint_*`, `azurerm_federated_identity_credential`, `azurerm_role_assignment`, `azurerm_role_definition`, `azurerm_user_assigned_identity`, `github_actions_*_oidc_subject_claim_customization_template`, `github_actions_*_permissions`, `github_actions_environment_*`, `github_branch_protection*`, `github_organization_ruleset`, `github_repository_collaborator*`, `github_repository_environment*`, `github_repository_ruleset`, `github_team_members`, `github_team_membership`, `github_team_repository`, `google_*_iam_*` (Terraform types, globs) |
+| `pipeline_identity` | Medium | Pipeline definitions: keys `*serviceConnection`, `azureSubscription*`, `connectedServiceName*`, `environment` (on a job), `id-token: write`, `permissions: write-all` |
 
 - Delivery rights count as identity and rights: Azure DevOps and GitHub service
   connections and their authorisations, deployment environments and their
   checks, branch policies and protections, and permissions decide who can act
   as a deploy identity. Generic secrets and variables
   (`github_actions_secret`, `azuredevops_variable_group`) do not.
-- Only `.tf` files are read, and in them only `resource` and `data` blocks of a
-  catalogued type. A mention of a type in any other file never counts.
+- For `identity_rights`, only `.tf` files are read, and in them only `resource`
+  and `data` blocks of a catalogued type. A mention of a type in any other file
+  never counts.
 - A block carries its class when any line in it is added, removed or altered:
   added lines are read at head, removed ones at the merge base. A rename is
   checked at both paths.
@@ -116,6 +118,32 @@ consequence in them.
   starts. A file that is not formatted may be misread.
 - A plan has no content, so a planned path names its classes instead (see
   [Plan file](#plan-file)).
+
+**Pipeline definitions.** `pipeline_identity` is what decides which code runs
+as an identity: a CI/CD pipeline that names a service connection or deploys to
+an environment. A file is a pipeline definition when its path matches one of
+`.github/workflows/*.yml`, `.github/workflows/*.yaml`, `**/azure-pipelines*.yml`,
+`**/azure-pipelines*.yaml`, `.azuredevops/**/*.yml`, `.azuredevops/**/*.yaml`,
+`**/pipelines/**/*.yml`, `**/pipelines/**/*.yaml`, `**/.pipelines/**/*.yml`,
+`**/.pipelines/**/*.yaml`, `**/azure-pipelines/**/*.yml`,
+`**/azure-pipelines/**/*.yaml`, `**/.azure-pipelines/**/*.yml` or
+`**/.azure-pipelines/**/*.yaml`, **and** it has one of these keys at column 0:
+`jobs`, `stages`, `steps`, `extends`, `trigger`, `pr`, `resources`,
+`schedules`, `variables`, `parameters` or `on` (a docker-compose or Helm file
+has none).
+
+- A changed line carries the class when its key, or a key it is nested under,
+  is a catalogued key. Keys match case-insensitively, and the consequence's
+  types are the keys as written (such as `azureSubscription`).
+- `environment` counts only on a job: a direct key of an Azure `- deployment:`
+  item, or `jobs.<job_id>.environment` in a GitHub workflow; never under
+  `variables:`, `env:` or `with:`.
+- Comments and block-scalar content (a `script: |` body) are never read as
+  keys. Added lines are read at head and removed ones at the merge base.
+- It is an indentation walk, not a YAML parser: flow style
+  (`permissions: { id-token: write }`) and list-form variables
+  (`- name: azureSubscription`) are not read, and an Azure `deployment` must be
+  its list item's first key.
 
 ### Test files
 
@@ -282,7 +310,9 @@ a JSON plan file that predicts the change:
   from the branch's first commit to merge.
 - `consequences` (optional, per file): the consequence classes the path is
   expected to carry, such as `{"path": "iam/roles.tf", "added": 20,
-  "consequences": ["identity_rights"]}`; see [Consequences](#consequences). An
+  "consequences": ["identity_rights"]}` or `{"path": "pipelines/release.yml",
+  "added": 40, "consequences": ["pipeline_identity"]}`; see
+  [Consequences](#consequences). An
   unknown class, or one listed twice for a path, is refused by name.
 - Which languages have tests (see [Which files count](#which-files-count))
   is read from the target's tree plus the planned paths; the plan file has no

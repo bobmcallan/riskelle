@@ -110,7 +110,7 @@ func TestIdentityRightsCatalog(t *testing.T) {
 			t.Errorf("consequencesOf(%q) = %v, want none", typ, got)
 		}
 	}
-	if !IsConsequence(ConsequenceIdentityRights) || IsConsequence("root_access") {
+	if !IsConsequence(ConsequenceIdentityRights) || !IsConsequence(ConsequencePipelineIdentity) || IsConsequence("root_access") {
 		t.Error("IsConsequence does not match the catalog")
 	}
 }
@@ -136,10 +136,15 @@ func TestReadmeListsConsequences(t *testing.T) {
 	}
 	cons := section("### Consequences")
 	for _, c := range builtinConsequences {
-		for _, s := range append([]string{c.class}, c.patterns...) {
+		for _, s := range append(append([]string{c.class}, c.patterns...), c.keys...) {
 			if !strings.Contains(cons, "`"+s+"`") {
 				t.Errorf("README Consequences does not list `%s`", s)
 			}
+		}
+	}
+	for _, g := range pipelineDefinitions {
+		if !strings.Contains(cons, "`"+g+"`") {
+			t.Errorf("README Consequences does not list pipeline path `%s`", g)
 		}
 	}
 	for _, s := range []string{"resource", "data", ".tf"} {

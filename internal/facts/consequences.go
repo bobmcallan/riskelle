@@ -13,11 +13,12 @@ import (
 // from its changed lines, not where it lands: a class sets a floor on the
 // level the change is reported at.
 const (
-	ConsequenceIdentityRights = "identity_rights"
+	ConsequenceIdentityRights   = "identity_rights"
+	ConsequencePipelineIdentity = "pipeline_identity"
 )
 
 // Consequence is one class a change carries, the changed or planned paths
-// that triggered it and the block types that did. Both lists are sorted,
+// that triggered it and the Terraform block types or pipeline keys that did. Both lists are sorted,
 // distinct and non-nil; Types is empty for a plan, which has no content.
 type Consequence struct {
 	Class string   `json:"class"`
@@ -26,7 +27,8 @@ type Consequence struct {
 }
 
 // builtinConsequences is the one catalog of consequence classes: for each, the
-// globs over Terraform resource and data types that carry it. Sorted by class
+// globs over Terraform resource and data types that carry it, or the pipeline
+// keys that do (pipelines.go). Sorted by class
 // and versioned with each release, beside builtin (classes.go) and
 // builtinAreas (areas.go).
 //
@@ -37,8 +39,9 @@ type Consequence struct {
 var builtinConsequences = []struct {
 	class    string
 	patterns []string
+	keys     []string
 }{
-	{ConsequenceIdentityRights, []string{
+	{class: ConsequenceIdentityRights, patterns: []string{
 		"aws_iam_*",
 		"azuread_app_role_assignment",
 		"azuread_application*",
@@ -69,6 +72,10 @@ var builtinConsequences = []struct {
 		"github_team_membership",
 		"github_team_repository",
 		"google_*_iam_*",
+	}},
+	{class: ConsequencePipelineIdentity, keys: []string{
+		"*serviceConnection", "azureSubscription*", "connectedServiceName*",
+		"environment", "id-token: write", "permissions: write-all",
 	}},
 }
 
@@ -191,11 +198,13 @@ func span(start, count string) []int {
 	return out
 }
 
-// collectConsequences finds the consequence classes in the .tf files of a
-// change: each changed line takes the type of the block it sits in, at head
-// for added lines and at the merge base for removed ones, and a catalogued
-// type adds its class with that side's path and the type. Only files whose
-// path ends in .tf are read. Nil when there are none.
+// collectConsequences finds the consequence classes in the .tf files and
+// pipeline definitions of a change, reading each changed line at head when
+// added and at the merge base when removed. In a .tf file a line takes the
+// type of the block it sits in, and a catalogued type adds its class with
+// that side's path and the type. In a pipeline definition a line's
+// pipelineIdentity mark adds pipeline_identity with the path and the mark.
+// No other file is read. Nil when there are none.
 func collectConsequences(ctx context.Context, repo, mergeBase, head string, files []File) ([]Consequence, error) {
 	type side struct {
 		path  string
@@ -203,7 +212,7 @@ func collectConsequences(ctx context.Context, repo, mergeBase, head string, file
 	}
 	var heads, bases []side
 	for _, f := range files {
-		if f.Binary || !(isTerraform(f.Path) || isTerraform(f.OldPath)) {
+		if f.Binary || !(readable(f.Path) || readable(f.OldPath)) {
 			continue
 		}
 		args := []string{"--literal-pathspecs", "--attr-source=" + head, "diff", "-U0"}
@@ -221,10 +230,10 @@ func collectConsequences(ctx context.Context, repo, mergeBase, head string, file
 		if f.OldPath != "" {
 			oldPath = f.OldPath
 		}
-		if len(new) > 0 && isTerraform(f.Path) {
+		if len(new) > 0 && readable(f.Path) {
 			heads = append(heads, side{f.Path, new})
 		}
-		if len(old) > 0 && isTerraform(oldPath) {
+		if len(old) > 0 && readable(oldPath) {
 			bases = append(bases, side{oldPath, old})
 		}
 	}
@@ -251,20 +260,32 @@ func collectConsequences(ctx context.Context, repo, mergeBase, head string, file
 				blobs = append(blobs, b)
 			}
 		}
+		hit := func(class, p, typ string) {
+			h := hits[class]
+			if h == nil {
+				h = &struct{ paths, types map[string]bool }{map[string]bool{}, map[string]bool{}}
+				hits[class] = h
+			}
+			h.paths[p] = true
+			h.types[typ] = true
+		}
 		err = catBlobs(ctx, repo, blobs, func(p string, content []byte) {
-			blocks := terraformBlocks(bytes.TrimSuffix(content, []byte("\n")))
+			content = bytes.TrimSuffix(content, []byte("\n"))
+			tf := isTerraform(p)
+			marks := pipelineIdentity(content)
+			if tf {
+				marks = terraformBlocks(content)
+			}
 			for _, n := range want[p] {
-				if n < 1 || n > len(blocks) || blocks[n-1] == "" {
+				if n < 1 || n > len(marks) || marks[n-1] == "" {
 					continue
 				}
-				for _, class := range consequencesOf(blocks[n-1]) {
-					h := hits[class]
-					if h == nil {
-						h = &struct{ paths, types map[string]bool }{map[string]bool{}, map[string]bool{}}
-						hits[class] = h
-					}
-					h.paths[p] = true
-					h.types[blocks[n-1]] = true
+				if !tf {
+					hit(ConsequencePipelineIdentity, p, marks[n-1])
+					continue
+				}
+				for _, class := range consequencesOf(marks[n-1]) {
+					hit(class, p, marks[n-1])
 				}
 			}
 		})
@@ -285,6 +306,9 @@ func collectConsequences(ctx context.Context, repo, mergeBase, head string, file
 
 // isTerraform reports whether a path is a Terraform configuration file.
 func isTerraform(p string) bool { return strings.HasSuffix(p, ".tf") }
+
+// readable reports whether collectConsequences reads a path.
+func readable(p string) bool { return isTerraform(p) || isPipeline(p) }
 
 // plannedConsequences gives each class a planned path names that path, with
 // no types. Nil when no path names one.

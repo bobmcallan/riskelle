@@ -104,6 +104,6 @@ func Default() Rules {
 		Levels: []LevelEdge{{0, Low}, {20, Medium}, {40, High}},
 
 		// A consequence raises the level to at least its floor, never the total.
-		ConsequenceFloors: []Floor{{facts.ConsequenceIdentityRights, Medium}},
+		ConsequenceFloors: []Floor{{facts.ConsequenceIdentityRights, Medium}, {facts.ConsequencePipelineIdentity, Medium}},
 	}
 }

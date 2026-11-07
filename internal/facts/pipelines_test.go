@@ -1,0 +1,99 @@
+package facts
+
+import (
+	"fmt"
+	"reflect"
+	"testing"
+)
+
+// marked returns the 1-based line numbers pipelineIdentity marks, each with
+// its mark, as "n:mark".
+func marked(content string) []string {
+	var out []string
+	for i, m := range pipelineIdentity([]byte(content)) {
+		if m != "" {
+			out = append(out, fmt.Sprintf("%02d:%s", i+1, m))
+		}
+	}
+	return out
+}
+
+func TestPipelineIdentity(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		want    []string
+	}{
+		// AC1: Azure
+		{"azure deployment environment", "jobs:\n- deployment: Deploy\n  environment: prod\n  strategy:\n    runOnce: {}\n",
+			[]string{"03:environment"}},
+		{"azure deployment indented", "stages:\n- stage: A\n  jobs:\n  - deployment: D\n    environment: prod\n",
+			[]string{"05:environment"}},
+		{"azure deployment environment after variables", "jobs:\n- deployment: D\n  variables:\n    x: 1\n  environment: prod\n",
+			[]string{"05:environment"}},
+		{"azure environment mapping", "jobs:\n- deployment: D\n  environment:\n    name: prod\n    resourceType: VirtualMachine\n  pool: x\n",
+			[]string{"03:environment", "04:environment", "05:environment"}},
+		{"azure cli task", "steps:\n- task: AzureCLI@2\n  inputs:\n    azureSubscription: graph-deploy\n    scriptType: bash\n",
+			[]string{"04:azureSubscription"}},
+		{"ARM connection", "steps:\n- task: X@1\n  inputs:\n    ConnectedServiceNameARM: sc\n", []string{"04:ConnectedServiceNameARM"}},
+		{"kubernetes connection", "steps:\n- task: Kubernetes@1\n  inputs:\n    kubernetesServiceConnection: k\n", []string{"04:kubernetesServiceConnection"}},
+		{"connection variable", "variables:\n  azureServiceConnection: prod-sc\n", []string{"02:azureServiceConnection"}},
+		// AC1: GitHub
+		{"github environment", "on: push\njobs:\n  deploy:\n    runs-on: ubuntu-latest\n    environment: prod\n", []string{"05:environment"}},
+		{"github environment mapping", "on: push\njobs:\n  deploy:\n    environment:\n      name: prod\n      url: x\n",
+			[]string{"04:environment", "05:environment", "06:environment"}},
+		{"github second job", "on: push\njobs:\n  build:\n    runs-on: x\n  deploy:\n    environment: prod\n", []string{"06:environment"}},
+		{"id-token write", "on: push\npermissions:\n  id-token: write\n  contents: read\n", []string{"03:id-token: write"}},
+		{"id-token quoted with comment", "on: push\npermissions:\n  'id-token': \"write\" # oidc\n", []string{"03:id-token: write"}},
+		{"write-all", "on: push\npermissions: write-all\n", []string{"02:permissions: write-all"}},
+		{"crlf", "jobs:\r\n- deployment: D\r\n  environment: prod\r\n", []string{"03:environment"}},
+		// AC2: no marks
+		{"docker-compose", "services:\n  app:\n    environment:\n      - FOO=bar\n", nil},
+		{"variables environment", "variables:\n  environment: dev\n", nil},
+		{"github env environment", "on: push\njobs:\n  build:\n    env:\n      environment: x\n", nil},
+		{"azure list job variable", "jobs:\n- job: Build\n  variables:\n    environment: dev\n", nil},
+		{"azure list job variable indented", "jobs:\n  - job: Build\n    variables:\n      environment: dev\n", nil},
+		{"deployment variable and environment", "jobs:\n- deployment: Deploy\n  variables:\n    environment: dev\n  environment: prod\n",
+			[]string{"05:environment"}},
+		{"plain job environment", "jobs:\n- job: Build\n  environment: prod\n", nil},
+		{"id-token read", "on: push\npermissions:\n  id-token: read\n", nil},
+		{"script body", "steps:\n- script: |\n    echo \"environment: prod\"\n    azureSubscription: x\n- bash: echo\n", nil},
+		{"commented key", "steps:\n- task: AzureCLI@2\n  inputs:\n    # azureSubscription: x\n    scriptType: bash\n", nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := marked(tt.content); !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("marks = %v, want %v", got, tt.want)
+			}
+		})
+	}
+	if got := pipelineIdentity([]byte("services:\n  app:\n    environment: x\n")); got != nil {
+		t.Errorf("unsigned content = %v, want nil", got)
+	}
+	if got := pipelineIdentity([]byte("jobs:\n- deployment: D\n  environment: prod\n")); len(got) != 4 {
+		t.Errorf("one mark per line: %d for 4 lines", len(got))
+	}
+}
+
+func TestIsPipeline(t *testing.T) {
+	for p, want := range map[string]bool{
+		".github/workflows/deploy.yml":      true,
+		".github/workflows/ci.yaml":         true,
+		"azure-pipelines.yml":               true,
+		"build/azure-pipelines-ci.yaml":     true,
+		".azuredevops/release.yml":          true,
+		"pipelines/release.yml":             true,
+		"infra/pipelines/stages/deploy.yml": true,
+		".pipelines/build.yaml":             true,
+		"azure-pipelines/templates/a.yml":   true,
+		"docker-compose.yml":                false,
+		"k8s/deploy.yaml":                   false,
+		".github/actions/x/action.yml":      false,
+		".github/workflows/sub/x.yml":       false,
+		"pipelines/README.md":               false,
+	} {
+		if got := isPipeline(p); got != want {
+			t.Errorf("isPipeline(%q) = %v, want %v", p, got, want)
+		}
+	}
+}
