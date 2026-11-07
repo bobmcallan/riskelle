@@ -37,8 +37,69 @@ func TestTerraformBlocks(t *testing.T) {
 		"aws_iam_role", "",
 		"", "", "",
 	}
-	if got := terraformBlocks([]byte(src)); !reflect.DeepEqual(got, want) {
+	lines := terraformBlocks([]byte(src))
+	if got := blocksOf(lines); !reflect.DeepEqual(got, want) {
 		t.Errorf("terraformBlocks =\n%q\nwant\n%q", got, want)
+	}
+	for n, attr := range map[int]string{2: "scope", 7: "policy", 8: "policy", 9: "policy", 15: ""} {
+		if lines[n-1].attr != attr {
+			t.Errorf("line %d attr %q, want %q", n, lines[n-1].attr, attr)
+		}
+	}
+}
+
+// blocksOf projects terraformBlocks' lines to their block types.
+func blocksOf(lines []tfLine) []string {
+	out := make([]string, len(lines))
+	for i, l := range lines {
+		out[i] = l.block
+	}
+	return out
+}
+
+// TestTerraformAttributes pins which top-level attribute each line of a block
+// falls in: an argument line and every line of its multi-line value up to its
+// closing bracket, a heredoc body wherever it sits, a nested block; never a
+// blank line or a comment between attributes; any attribute column.
+func TestTerraformAttributes(t *testing.T) {
+	src := []struct{ line, attr string }{
+		{`resource "azuread_group" "g" {`, ""},
+		{`  display_name = "g"`, "display_name"},
+		{`  members = [`, "members"},
+		{`    "a",`, "members"},
+		{``, ""},
+		{`    # b left`, "members"},
+		{`    "c",`, "members"},
+		{`  ]`, "members"},
+		{`  owners = data.azuread_users.o.object_ids`, "owners"},
+		{`  description = <<EOT`, "description"},
+		{`members = ["x"]`, "description"},
+		{`EOT`, "description"},
+		{`  lifecycle {`, "lifecycle"},
+		{`    ignore_changes = [members]`, "lifecycle"},
+		{`  }`, "lifecycle"},
+		{`  # owners below`, ""},
+		{`  owners = concat(`, "owners"},
+		{`    local.a,`, "owners"},
+		{`  )`, "owners"},
+		{`}`, ""},
+		{`resource "azuread_group" "four" {`, ""},
+		{`    members = ["a"]`, "members"},
+		{`    display_name = "four"`, "display_name"},
+		{`}`, ""},
+	}
+	var text []string
+	for _, l := range src {
+		text = append(text, l.line)
+	}
+	lines := terraformBlocks([]byte(strings.Join(text, "\n")))
+	for i, l := range src {
+		if lines[i].attr != l.attr {
+			t.Errorf("line %d %q: attr %q, want %q", i+1, l.line, lines[i].attr, l.attr)
+		}
+		if lines[i].block != "azuread_group" {
+			t.Errorf("line %d %q: block %q, want azuread_group", i+1, l.line, lines[i].block)
+		}
 	}
 }
 
@@ -95,6 +156,8 @@ func TestIdentityRightsCatalog(t *testing.T) {
 		"github_actions_repository_permissions", "github_actions_organization_permissions",
 		"github_actions_repository_oidc_subject_claim_customization_template",
 		"github_actions_organization_oidc_subject_claim_customization_template",
+		// group membership
+		"azuread_group_member", "azuread_group_role_management_policy", "azuread_administrative_unit_member",
 	} {
 		if got := consequencesOf(typ); !reflect.DeepEqual(got, []string{ConsequenceIdentityRights}) {
 			t.Errorf("consequencesOf(%q) = %v, want [identity_rights]", typ, got)
@@ -108,6 +171,22 @@ func TestIdentityRightsCatalog(t *testing.T) {
 	} {
 		if got := consequencesOf(typ); got != nil {
 			t.Errorf("consequencesOf(%q) = %v, want none", typ, got)
+		}
+	}
+	for _, tt := range []struct {
+		typ, attr string
+		want      []string
+	}{
+		{"azuread_group", "members", []string{ConsequenceIdentityRights}},
+		{"azuread_group", "owners", []string{ConsequenceIdentityRights}},
+		{"azuread_group", "description", nil},
+		{"azuread_group", "display_name", nil},
+		{"azuread_group", "lifecycle", nil},
+		{"azuread_group", "", nil},
+		{"azurerm_role_assignment", "members", nil},
+	} {
+		if got := attributeConsequencesOf(tt.typ, tt.attr); !reflect.DeepEqual(got, tt.want) {
+			t.Errorf("attributeConsequencesOf(%q, %q) = %v, want %v", tt.typ, tt.attr, got, tt.want)
 		}
 	}
 	if !IsConsequence(ConsequenceIdentityRights) || !IsConsequence(ConsequencePipelineIdentity) || IsConsequence("root_access") {
@@ -136,7 +215,14 @@ func TestReadmeListsConsequences(t *testing.T) {
 	}
 	cons := section("### Consequences")
 	for _, c := range builtinConsequences {
-		for _, s := range append(append([]string{c.class}, c.patterns...), c.keys...) {
+		names := append(append([]string{c.class}, c.patterns...), c.keys...)
+		for typ, attrs := range c.attributes {
+			names = append(names, typ)
+			for _, a := range attrs {
+				names = append(names, typ+"."+a)
+			}
+		}
+		for _, s := range names {
 			if !strings.Contains(cons, "`"+s+"`") {
 				t.Errorf("README Consequences does not list `%s`", s)
 			}

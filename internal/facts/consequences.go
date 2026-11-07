@@ -18,7 +18,8 @@ const (
 )
 
 // Consequence is one class a change carries, the changed or planned paths
-// that triggered it and the Terraform block types or pipeline keys that did. Both lists are sorted,
+// that triggered it and the Terraform block types (with ".<attribute>" when
+// an attribute of the block carried it) or pipeline keys that did. Both lists are sorted,
 // distinct and non-nil; Types is empty for a plan, which has no content.
 type Consequence struct {
 	Class string   `json:"class"`
@@ -37,15 +38,19 @@ type Consequence struct {
 // and protections, and permissions decide who can act as a deploy identity,
 // as a federated credential does. Generic secret and variable stores do not.
 var builtinConsequences = []struct {
-	class    string
-	patterns []string
-	keys     []string
+	class      string
+	patterns   []string
+	keys       []string
+	attributes map[string][]string // exact type: the top-level attributes whose lines carry the class
 }{
 	{class: ConsequenceIdentityRights, patterns: []string{
 		"aws_iam_*",
+		"azuread_administrative_unit_member",
 		"azuread_app_role_assignment",
 		"azuread_application*",
 		"azuread_directory_role*",
+		"azuread_group_member",
+		"azuread_group_role_management_policy",
 		"azuread_service_principal*",
 		"azuredevops_*_permissions",
 		"azuredevops_branch_policy_*",
@@ -72,6 +77,9 @@ var builtinConsequences = []struct {
 		"github_team_membership",
 		"github_team_repository",
 		"google_*_iam_*",
+	}, attributes: map[string][]string{
+		// who is in a group decides who holds the roles granted to it
+		"azuread_group": {"members", "owners"},
 	}},
 	{class: ConsequencePipelineIdentity, keys: []string{
 		"*serviceConnection", "azureSubscription*", "connectedServiceName*",
@@ -103,6 +111,23 @@ func IsConsequence(class string) bool {
 	return false
 }
 
+// attributeConsequencesOf returns the classes a line in attr of a block of
+// type typ carries by the catalog's attributes; nil when attr is "".
+func attributeConsequencesOf(typ, attr string) []string {
+	if attr == "" {
+		return nil
+	}
+	var out []string
+	for _, c := range builtinConsequences {
+		for _, a := range c.attributes[typ] {
+			if a == attr {
+				out = append(out, c.class)
+			}
+		}
+	}
+	return out
+}
+
 // consequencesOf returns the classes a block type carries.
 func consequencesOf(typ string) []string {
 	var out []string
@@ -117,8 +142,18 @@ func consequencesOf(typ string) []string {
 // blockHeader matches a resource or data block header at column 0.
 var blockHeader = regexp.MustCompile(`^(?:resource|data)[ \t]+"?([A-Za-z][A-Za-z0-9_-]*)"?`)
 
+// tfLine is one line of a Terraform file: the resource or data type of the
+// top-level block it belongs to, and the block's top-level attribute it falls
+// in ("" when none).
+type tfLine struct{ block, attr string }
+
+// tfAttr matches the identifier that opens a top-level attribute line.
+var tfAttr = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_-]*`)
+
 // terraformBlocks returns, for each line of content (index 0 is line 1), the
-// resource or data type of the top-level block it belongs to, or "" when none.
+// resource or data type of the top-level block it belongs to, or "" when none,
+// and the top-level attribute of that block it falls in.
+//
 // A block is found by its header at column 0, as terraform fmt writes every
 // file: a column-0 line other than "}", or a "#", "//" or "/*" comment, opens
 // a new block, and a column-0 "}" closes the open one. Indented and blank
@@ -126,30 +161,54 @@ var blockHeader = regexp.MustCompile(`^(?:resource|data)[ \t]+"?([A-Za-z][A-Za-z
 // heredoc's body, up to its closing marker, wherever it starts: an IAM policy
 // is often a heredoc of JSON at column 0. No braces are counted, so braces in
 // strings and heredocs cannot mislead it.
-func terraformBlocks(content []byte) []string {
+//
+// The attribute column is the indent of the block's first indented line. A
+// line at that column opens the attribute its leading identifier names (an
+// argument or a nested block); a deeper line, a heredoc body, and a closing
+// "]", ")" or "}" at that column continue the open one. Blank lines and
+// column-0 comments carry none and change nothing.
+func terraformBlocks(content []byte) []tfLine {
 	lines := strings.Split(string(content), "\n")
-	out := make([]string, len(lines))
-	open, heredoc := "", ""
+	out := make([]tfLine, len(lines))
+	open, heredoc, attr, col := "", "", "", -1
 	for i, l := range lines {
+		trimmed := strings.TrimLeft(l, " \t")
 		switch {
 		case heredoc != "":
-			out[i] = open
+			out[i] = tfLine{open, attr}
 			if strings.TrimSpace(l) == heredoc {
 				heredoc = ""
 			}
 			continue
-		case l == "" || l[0] == ' ' || l[0] == '\t' ||
-			strings.HasPrefix(l, "#") || strings.HasPrefix(l, "//") || strings.HasPrefix(l, "/*"):
-			out[i] = open
+		case strings.TrimSpace(l) == "" || strings.HasPrefix(l, "#") || strings.HasPrefix(l, "//") || strings.HasPrefix(l, "/*"):
+			out[i] = tfLine{open, ""}
+		case l[0] == ' ' || l[0] == '\t':
+			indent := len(l) - len(trimmed)
+			if col < 0 {
+				col = indent
+			}
+			switch {
+			case open == "" || indent > col:
+			case strings.ContainsAny(trimmed[:1], "])}"):
+				out[i] = tfLine{open, attr}
+				attr = ""
+				continue
+			default:
+				attr = tfAttr.FindString(trimmed)
+			}
+			if open == "" {
+				attr = ""
+			}
+			out[i] = tfLine{open, attr}
 		case l[0] == '}':
-			out[i] = open
-			open = ""
+			out[i] = tfLine{open, ""}
+			open, attr, col = "", "", -1
 		default:
-			open = ""
+			open, attr, col = "", "", -1
 			if m := blockHeader.FindStringSubmatch(l); m != nil {
 				open = m[1]
 			}
-			out[i] = open
+			out[i] = tfLine{open, ""}
 			if strings.HasSuffix(strings.TrimRight(l, " \t\r"), "}") {
 				open = "" // a one-line block
 			}
@@ -271,21 +330,26 @@ func collectConsequences(ctx context.Context, repo, mergeBase, head string, file
 		}
 		err = catBlobs(ctx, repo, blobs, func(p string, content []byte) {
 			content = bytes.TrimSuffix(content, []byte("\n"))
-			tf := isTerraform(p)
-			marks := pipelineIdentity(content)
-			if tf {
-				marks = terraformBlocks(content)
+			if !isTerraform(p) {
+				marks := pipelineIdentity(content)
+				for _, n := range want[p] {
+					if n >= 1 && n <= len(marks) && marks[n-1] != "" {
+						hit(ConsequencePipelineIdentity, p, marks[n-1])
+					}
+				}
+				return
 			}
+			lines := terraformBlocks(content)
 			for _, n := range want[p] {
-				if n < 1 || n > len(marks) || marks[n-1] == "" {
+				if n < 1 || n > len(lines) || lines[n-1].block == "" {
 					continue
 				}
-				if !tf {
-					hit(ConsequencePipelineIdentity, p, marks[n-1])
-					continue
+				l := lines[n-1]
+				for _, class := range consequencesOf(l.block) {
+					hit(class, p, l.block)
 				}
-				for _, class := range consequencesOf(marks[n-1]) {
-					hit(class, p, marks[n-1])
+				for _, class := range attributeConsequencesOf(l.block, l.attr) {
+					hit(class, p, l.block+"."+l.attr)
 				}
 			}
 		})

@@ -111,7 +111,7 @@ or absolute glob are refused by name: a repo class can only raise the level.
 
 | Class | Floor | Read from |
 | --- | --- | --- |
-| `identity_rights` | Medium | `aws_iam_*`, `azuread_app_role_assignment`, `azuread_application*`, `azuread_directory_role*`, `azuread_service_principal*`, `azuredevops_*_permissions`, `azuredevops_branch_policy_*`, `azuredevops_check_*`, `azuredevops_environment*`, `azuredevops_group_membership`, `azuredevops_pipeline_authorization`, `azuredevops_resource_authorization`, `azuredevops_securityrole_assignment`, `azuredevops_serviceendpoint_*`, `azurerm_federated_identity_credential`, `azurerm_role_assignment`, `azurerm_role_definition`, `azurerm_user_assigned_identity`, `github_actions_*_oidc_subject_claim_customization_template`, `github_actions_*_permissions`, `github_actions_environment_*`, `github_branch_protection*`, `github_organization_ruleset`, `github_repository_collaborator*`, `github_repository_environment*`, `github_repository_ruleset`, `github_team_members`, `github_team_membership`, `github_team_repository`, `google_*_iam_*` (Terraform types, globs) |
+| `identity_rights` | Medium | `aws_iam_*`, `azuread_administrative_unit_member`, `azuread_app_role_assignment`, `azuread_application*`, `azuread_directory_role*`, `azuread_group_member`, `azuread_group_role_management_policy`, `azuread_service_principal*`, `azuredevops_*_permissions`, `azuredevops_branch_policy_*`, `azuredevops_check_*`, `azuredevops_environment*`, `azuredevops_group_membership`, `azuredevops_pipeline_authorization`, `azuredevops_resource_authorization`, `azuredevops_securityrole_assignment`, `azuredevops_serviceendpoint_*`, `azurerm_federated_identity_credential`, `azurerm_role_assignment`, `azurerm_role_definition`, `azurerm_user_assigned_identity`, `github_actions_*_oidc_subject_claim_customization_template`, `github_actions_*_permissions`, `github_actions_environment_*`, `github_branch_protection*`, `github_organization_ruleset`, `github_repository_collaborator*`, `github_repository_environment*`, `github_repository_ruleset`, `github_team_members`, `github_team_membership`, `github_team_repository`, `google_*_iam_*` (Terraform types, globs); `azuread_group` only in its `members` or `owners` attribute, reported as `azuread_group.members` or `azuread_group.owners` |
 | `pipeline_identity` | Medium | Pipeline definitions: keys `*serviceConnection`, `azureSubscription*`, `connectedServiceName*`, `environment` (on a job), `id-token: write`, `permissions: write-all` |
 
 - Delivery rights count as identity and rights: Azure DevOps and GitHub service
@@ -119,6 +119,15 @@ or absolute glob are refused by name: a repo class can only raise the level.
   checks, branch policies and protections, and permissions decide who can act
   as a deploy identity. Generic secrets and variables
   (`github_actions_secret`, `azuredevops_variable_group`) do not.
+- Group membership counts too: who is in a group decides who holds the roles
+  granted to it, as a role assignment does.
+- For a type listed with attributes, a block carries the class only when a
+  changed line falls in one of those attributes at the block's top level: the
+  argument line and every line of its multi-line value (a list, a function
+  call or a heredoc) up to its closing bracket. The attribute column is the
+  indent of the block's first indented line. Blank lines, comments between
+  attributes, other arguments (such as `description` or `display_name`) and
+  nested blocks (such as `lifecycle`) carry none.
 - For `identity_rights`, only `.tf` files are read, and in them only `resource`
   and `data` blocks of a catalogued type. A mention of a type in any other file
   never counts.
