@@ -413,3 +413,44 @@ func TestCollectConsequences(t *testing.T) {
 		}
 	})
 }
+
+// TestCollectShellShebang collects each changed file's Language: Shell for an
+// extensionless file whose first line at head is a shell shebang, none for a
+// non-shell shebang, no shebang, an extension or a deleted file.
+func TestCollectShellShebang(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	dir := t.TempDir()
+	runGit(t, dir, "init", "--quiet", "--initial-branch=main")
+	write(t, dir, "README.md", "# x\n")
+	write(t, dir, "scripts/old", "#!/bin/sh\nrm -rf build\nmake clean\nmake all\n")
+	runGit(t, dir, "add", ".")
+	runGit(t, dir, "commit", "--quiet", "-m", "base")
+	runGit(t, dir, "switch", "--quiet", "-c", "feature")
+	write(t, dir, "scripts/deploy", "#!/usr/bin/env bash\necho\n")
+	write(t, dir, "scripts/sync", "#!/usr/bin/env python3\nprint()\n")
+	write(t, dir, "scripts/notes", "plain\n")
+	write(t, dir, "scripts/run.sh", "#!/bin/sh\necho\n")
+	runGit(t, dir, "rm", "--quiet", "scripts/old")
+	runGit(t, dir, "add", ".")
+	runGit(t, dir, "commit", "--quiet", "-m", "feature")
+
+	got, err := Collect(context.Background(), dir, "main", "feature")
+	if err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+	want := map[string]string{"scripts/deploy": "Shell", "scripts/sync": "", "scripts/notes": "", "scripts/run.sh": "", "scripts/old": ""}
+	lang := map[string]string{"scripts/deploy": "Shell", "scripts/sync": "", "scripts/notes": "", "scripts/run.sh": "Shell", "scripts/old": ""}
+	if len(got.Files) != len(want) {
+		t.Fatalf("files = %+v, want %d", got.Files, len(want))
+	}
+	for _, f := range got.Files {
+		if f.Language != want[f.Path] {
+			t.Errorf("%s: Language %q, want %q", f.Path, f.Language, want[f.Path])
+		}
+		if l := LanguageOf(f); l != lang[f.Path] {
+			t.Errorf("%s: LanguageOf %q, want %q", f.Path, l, lang[f.Path])
+		}
+	}
+}

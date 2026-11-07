@@ -137,6 +137,15 @@ func isScriptTest(base string) bool {
 	return ok
 }
 
+// LanguageOf returns the unpaired language of a changed file: the one its
+// path names (UnpairedLanguage), else the one its content names (Language).
+func LanguageOf(f File) string {
+	if lang := UnpairedLanguage(f.Path); lang != "" {
+		return lang
+	}
+	return f.Language
+}
+
 // UnpairedLanguage returns the unpaired language a production path is
 // written in, from its extension alone, or "" when it is in none.
 func UnpairedLanguage(p string) string {

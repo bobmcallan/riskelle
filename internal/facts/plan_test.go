@@ -150,3 +150,25 @@ func TestPredictConsequences(t *testing.T) {
 		t.Errorf("Predict(no consequence) = %+v, %v; want none", got.Consequences, err)
 	}
 }
+
+// TestPredictReadsShebang pins that a planned extensionless path is read at
+// the target: an existing shell script names Shell, a new path names none.
+func TestPredictReadsShebang(t *testing.T) {
+	f := newFixture(t)
+	write(t, f.dir, "scripts/deploy", "#!/bin/bash\necho\n")
+	runGit(t, f.dir, "add", ".")
+	runGit(t, f.dir, "commit", "--quiet", "-m", "script")
+	got, err := Predict(context.Background(), f.dir, Plan{Target: "main", Files: []PlannedFile{
+		{Path: "scripts/deploy", Added: 1, Removed: 1},
+		{Path: "scripts/new-tool", Added: 20},
+	}})
+	if err != nil {
+		t.Fatalf("Predict: %v", err)
+	}
+	want := map[string]string{"scripts/deploy": "Shell", "scripts/new-tool": ""}
+	for _, file := range got.Files {
+		if file.Language != want[file.Path] {
+			t.Errorf("%s: Language %q, want %q", file.Path, file.Language, want[file.Path])
+		}
+	}
+}

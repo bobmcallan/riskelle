@@ -18,6 +18,10 @@ type File struct {
 	Binary  bool    `json:"binary,omitempty"`  // git reported no line counts; Added and Removed are 0
 	New     bool    `json:"new,omitempty"`     // absent at the merge base; every line in Added is new code
 	Classes []Class `json:"classes,omitempty"` // path classes from Classify; nil when none
+	// The unpaired language read from the file's content when its path names
+	// none: "Shell" for an extensionless file whose first line is a shell
+	// shebang; "" otherwise.
+	Language string `json:"language,omitempty"`
 }
 
 // Facts are the collected facts about one change. Every slice is sorted and

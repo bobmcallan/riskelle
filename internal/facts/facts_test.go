@@ -109,3 +109,13 @@ func TestFactsConsequencesJSON(t *testing.T) {
 		t.Errorf("facts = %s, want it to contain %s", b, want)
 	}
 }
+
+// TestFileLanguageJSON pins that a file's language is omitted when empty, so
+// facts without one keep their JSON.
+func TestFileLanguageJSON(t *testing.T) {
+	plain, _ := json.Marshal(File{Path: "a.go"})
+	script, _ := json.Marshal(File{Path: "scripts/deploy", Language: "Shell"})
+	if strings.Contains(string(plain), "language") || !strings.Contains(string(script), `"language":"Shell"`) {
+		t.Errorf("JSON: %s; %s", plain, script)
+	}
+}

@@ -262,3 +262,23 @@ func TestReadmeListsScriptTests(t *testing.T) {
 		}
 	}
 }
+
+// TestLanguageOf pins that a file's path names its unpaired language first,
+// and its content-read Language only when the path names none.
+func TestLanguageOf(t *testing.T) {
+	for _, tt := range []struct {
+		f    File
+		want string
+	}{
+		{File{Path: "scripts/run.sh"}, "Shell"},
+		{File{Path: "infra/main.tf"}, "Terraform"},
+		{File{Path: "scripts/deploy", Language: "Shell"}, "Shell"},
+		{File{Path: "scripts/deploy"}, ""},
+		{File{Path: "app/main.go"}, ""},
+		{File{Path: "infra/main.tf", Language: "Shell"}, "Terraform"},
+	} {
+		if got := LanguageOf(tt.f); got != tt.want {
+			t.Errorf("LanguageOf(%+v) = %q, want %q", tt.f, got, tt.want)
+		}
+	}
+}

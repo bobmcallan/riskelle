@@ -156,7 +156,7 @@ func Predict(ctx context.Context, repo string, p Plan) (Facts, error) {
 	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
 	markNew(files, atTarget)
 	// A planned path is read at the target, as the score will read it at head.
-	if err := markGeneratedHeads(ctx, repo, target, files); err != nil {
+	if err := markHeads(ctx, repo, target, files); err != nil {
 		return Facts{}, err
 	}
 

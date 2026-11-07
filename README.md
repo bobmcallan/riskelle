@@ -52,7 +52,7 @@ share of their changes that are low risk, so the score must be:
 | Degree | How much *existing* code is altered, against code in new files (tests are left out, as for size, and by default so are non-code files and run records) |
 | Impact | How many places depend on what changed (for Go, packages importing a changed package; otherwise files referencing a changed file) |
 | Branch age | Days from the branch's first commit to merge, and how far the trunk moved meanwhile |
-| Tests | Production code files changed without their paired test (see [Tests and their pairs](#tests-and-their-pairs)); a Shell or Terraform file counts only when no test changed and the repo holds a test in its language; any other file (YAML, JSON, XML, other config or data, an extensionless file) is not code and never counts (see [Which files count](#which-files-count)) |
+| Tests | Production code files changed without their paired test (see [Tests and their pairs](#tests-and-their-pairs)); a Shell or Terraform file (an extensionless script whose first line is a shell shebang included) counts only when no test changed and the repo holds a test in its language; any other file (YAML, JSON, XML, other config or data, an extensionless file with no shell shebang) is not code and never counts (see [Which files count](#which-files-count)) |
 
 A file is generated when its path matches a built-in or repo-added generated
 pattern, or when its header carries a marker. The header is the comment lines
@@ -188,9 +188,10 @@ with it. The rules are owned by `internal/facts/pairs.go`; for a file `x`:
   `tests/` files are named by feature. A `.bats` file has no fixed subject.
   C/C++ headers (`.h`, `.hpp`) are not paired either.
 - A Shell script test names its script (`scripts/plan-guard-test` tests
-  `scripts/plan-guard`), but an extensionless script names no language and
-  never counts as untested. A `.sh` or `.bash` script is scored by the Shell
-  rule below.
+  `scripts/plan-guard`), but scripts are scored by the Shell rule below: a
+  `.sh` or `.bash` script, or an extensionless one whose first line is a shell
+  shebang. An extensionless script with no shell shebang names no language and
+  never counts as untested.
 
 #### Which files count
 
@@ -207,17 +208,23 @@ change would be the only way down, which buys no safety.
 
 | Language | Production files | Its tests |
 | --- | --- | --- |
-| Shell | `.sh`, `.bash` | `.bats` |
+| Shell | `.sh`, `.bash`; an extensionless file with a shell shebang | `.bats` |
 | Terraform | `.tf`, `.tfvars` | `.tftest.hcl`, `.tftest.json` |
 
+- An extensionless file is a Shell script when its first line at head is a
+  shell shebang: `#!` then `sh`, `bash`, `dash`, `zsh` or `ksh`, by path
+  (`#!/bin/bash`) or through `env` (`#!/usr/bin/env bash`). Any other first
+  line, none, `python3` or `node`, names no language. A file with an extension
+  is judged by its extension alone. The line is read in the same pass as
+  generated headers; a deleted file has none.
 - A file the catalog classes test with the language's extension (such as
   `tests/smoke.sh`) also counts as a test in that language.
 - A Shell script test (`x-test`, `x_test`, `test-x`), extensionless included,
-  counts as a Shell test, so a repo of extensionless scripts with their tests
+  counts as a Shell test whatever its first line, so a repo of extensionless scripts with their tests
   holds Shell tests.
 - Any other file is not code that riskelle can test: YAML (pipelines included),
-  JSON, XML, TOML, other config and data, extensionless files (scripts, a
-  `Makefile`, a `Dockerfile`, data files), and languages with no row above
+  JSON, XML, TOML, other config and data, extensionless files with no shell
+  shebang (a `Makefile`, a `Dockerfile`, a Python or Node script, data files), and languages with no row above
   (Rust, C/C++ headers). It never counts as untested. It still counts for
   size, spread and degree; what it touches is the consequence axis's concern
   (see [Consequences](#consequences)).
@@ -264,8 +271,11 @@ a JSON plan file that predicts the change:
     be given; an absent one is 0.
   - Planned tests are the test files listed (they are classed from the path,
     as in a real diff, and their lines are left out of size and degree).
-  - A planned path that exists at the target is also classed generated when
-    its header there carries a marker.
+  - A planned path that exists at the target is read there: it is also classed
+    generated when its header carries a marker, and an extensionless one is a
+    Shell script when its first line is a shell shebang. A new extensionless
+    path has no content, so it names no language (see
+    [Which files count](#which-files-count)).
   - A move is its old path with the removed lines plus its new path with the
     added lines.
 - `branch_age_days` (optional, default 0, non-negative): the expected days

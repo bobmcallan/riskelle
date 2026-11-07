@@ -14,7 +14,8 @@ import (
 //   - a paired language (facts.HasPairing) counts unless a changed test pairs
 //     with it: the test's subject (facts.TestSubject) is the file's base name,
 //     in any directory;
-//   - an unpaired language (facts.UnpairedLanguage: Shell, Terraform) is tested
+//   - an unpaired language (facts.LanguageOf: Shell, Terraform, or an
+//     extensionless script whose first line is a shell shebang) is tested
 //     when any file at all is classed test, and otherwise counts only when
 //     langs, the unpaired languages with a test in the head tree, holds its
 //     language: a repo with no tests in that language has no way to write one;
@@ -32,7 +33,7 @@ func untested(all, kept []facts.File, langs []string, r Rules) Point {
 			if subjects[path.Base(file.Path)] {
 				continue
 			}
-		} else if lang := facts.UnpairedLanguage(file.Path); lang == "" || anyTest || !contains(langs, lang) {
+		} else if lang := facts.LanguageOf(file); lang == "" || anyTest || !contains(langs, lang) {
 			continue
 		}
 		p.From = append(p.From, file.Path)

@@ -243,3 +243,74 @@ func TestDataFilesAreNeverUntested(t *testing.T) {
 		}
 	})
 }
+
+// TestShebangScripts drives the built binary: an extensionless script whose
+// first line is a shell shebang is a Shell script, so it counts as untested
+// only when the repo holds Shell tests (an extensionless shebang script test
+// is one); a non-shell shebang or none never counts; estimate reads an
+// existing script at the target and names no language for a new path, the
+// same every run.
+func TestShebangScripts(t *testing.T) {
+	bin := buildRiskelle(t, t.TempDir())
+	scoreOut := func(t *testing.T, dir string) string {
+		t.Helper()
+		code, out, stderr := runScore(t, bin, dir, "--base", "main", "--head", "topic")
+		if code != 0 {
+			t.Fatalf("score exit %d: %s", code, stderr)
+		}
+		return out
+	}
+	withTest := map[string]string{"scripts/plan-guard-test": "#!/bin/sh\ntrue\n", "scripts/plan-guard": "#!/bin/sh\na\n"}
+	for _, tt := range []struct {
+		name  string
+		base  map[string]string
+		topic map[string]string
+		want  []string
+	}{
+		{"shell shebang, shell tests in repo", withTest,
+			map[string]string{"scripts/plan-guard": "#!/bin/sh\nb\n"}, []string{"scripts/plan-guard"}},
+		{"shell shebang script test absent", map[string]string{"README.md": "# x\n", "scripts/plan-guard": "#!/bin/sh\na\n"},
+			map[string]string{"scripts/plan-guard": "#!/bin/sh\nb\n"}, []string{}},
+		{"env bash shebang, no shell tests", map[string]string{"README.md": "# x\n", "scripts/deploy": "#!/usr/bin/env bash\na\n"},
+			map[string]string{"scripts/deploy": "#!/usr/bin/env bash\nb\n"}, []string{}},
+		{"python shebang, shell tests in repo", map[string]string{"scripts/plan-guard-test": "#!/bin/sh\ntrue\n", "scripts/sync": "#!/usr/bin/env python3\na\n"},
+			map[string]string{"scripts/sync": "#!/usr/bin/env python3\nb\n"}, []string{}},
+		{"no shebang, shell tests in repo", map[string]string{"scripts/plan-guard-test": "#!/bin/sh\ntrue\n", "scripts/notes": "a\n"},
+			map[string]string{"scripts/notes": "b\n"}, []string{}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			p := untestedPoint(t, scoreOut(t, rulesFixture(t, tt.base, tt.topic)))
+			if !reflect.DeepEqual(p.From, tt.want) {
+				t.Errorf("untested from %v, want %v", p.From, tt.want)
+			}
+		})
+	}
+
+	t.Run("estimate", func(t *testing.T) {
+		dir := rulesFixture(t, withTest, map[string]string{"scripts/plan-guard": "#!/bin/sh\nb\n"})
+		for _, tt := range []struct {
+			plan string
+			want []string
+		}{
+			{`{"target":"main","files":[{"path":"scripts/plan-guard","added":1,"removed":1}]}`, []string{"scripts/plan-guard"}},
+			{`{"target":"main","files":[{"path":"scripts/new-tool","added":20}]}`, []string{}},
+		} {
+			plan := filepath.Join(t.TempDir(), "plan.json")
+			os.WriteFile(plan, []byte(tt.plan), 0o644)
+			var outs []string
+			for i := 0; i < 2; i++ {
+				code, out, stderr := runEstimate(t, bin, dir, plan)
+				if code != 0 {
+					t.Fatalf("estimate exit %d: %s", code, stderr)
+				}
+				outs = append(outs, out)
+			}
+			if outs[0] != outs[1] {
+				t.Errorf("estimate not deterministic for %s", tt.plan)
+			}
+			if p := untestedPoint(t, outs[0]); !reflect.DeepEqual(p.From, tt.want) {
+				t.Errorf("%s: estimate untested from %v, want %v", tt.plan, p.From, tt.want)
+			}
+		}
+	})
+}

@@ -3,6 +3,7 @@ package facts
 import (
 	"bytes"
 	"context"
+	"path"
 	"slices"
 	"strings"
 )
@@ -51,6 +52,36 @@ func GeneratedHeader(content []byte) bool {
 	return false
 }
 
+// shellInterpreters are the interpreters whose shebang makes an extensionless
+// file a Shell script.
+var shellInterpreters = []string{"sh", "bash", "dash", "zsh", "ksh"}
+
+// ShellShebang reports whether content's first line is a shell shebang: "#!"
+// then one of shellInterpreters, by path (#!/bin/bash) or through env
+// (#!/usr/bin/env bash, env options and VAR=x assignments skipped). A leading
+// UTF-8 BOM is dropped and a trailing "\r" stripped. Content git treats as
+// binary has no shebang.
+func ShellShebang(content []byte) bool {
+	if !isText(content) {
+		return false
+	}
+	content = bytes.TrimPrefix(content, []byte("\xef\xbb\xbf"))
+	line, _, _ := strings.Cut(string(content), "\n")
+	line = strings.TrimSuffix(line, "\r")
+	rest, ok := strings.CutPrefix(line, "#!")
+	if !ok {
+		return false
+	}
+	fields := strings.Fields(rest)
+	if len(fields) > 0 && path.Base(fields[0]) == "env" {
+		fields = fields[1:]
+		for len(fields) > 0 && (strings.HasPrefix(fields[0], "-") || strings.Contains(fields[0], "=")) {
+			fields = fields[1:]
+		}
+	}
+	return len(fields) > 0 && slices.Contains(shellInterpreters, path.Base(fields[0]))
+}
+
 func hasCommentLeader(line string) bool {
 	for _, l := range commentLeaders {
 		if strings.HasPrefix(line, l) {
@@ -76,11 +107,12 @@ func withClass(classes []Class, c Class) []Class {
 	return out
 }
 
-// markGeneratedHeads classes as generated each file, not already generated,
-// whose blob at commit carries a generated marker in its header. A path with
-// no regular-file blob at commit (deleted, or planned new) keeps its path
-// classes.
-func markGeneratedHeads(ctx context.Context, repo, commit string, files []File) error {
+// markHeads reads each changed file, not already generated, at commit. A
+// file whose header carries a generated marker is classed generated; an
+// extensionless file whose first line is a shell shebang names Shell as its
+// Language. A path with no regular-file blob at commit (deleted, or planned
+// new) keeps its path classes and names no language.
+func markHeads(ctx context.Context, repo, commit string, files []File) error {
 	idx := map[string]int{}
 	for i, f := range files {
 		if !slices.Contains(f.Classes, ClassGenerated) {
@@ -101,9 +133,12 @@ func markGeneratedHeads(ctx context.Context, repo, commit string, files []File) 
 		}
 	}
 	return catBlobs(ctx, repo, read, func(p string, content []byte) {
+		i := idx[p]
 		if GeneratedHeader(content) {
-			i := idx[p]
 			files[i].Classes = withClass(files[i].Classes, ClassGenerated)
+		}
+		if path.Ext(path.Base(p)) == "" && ShellShebang(content) {
+			files[i].Language = scriptLanguage
 		}
 	})
 }

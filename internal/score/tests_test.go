@@ -16,6 +16,7 @@ func TestUntestedUnpairedLanguages(t *testing.T) {
 	test := func(p string) facts.File {
 		return facts.File{Path: p, Added: 5, Classes: []facts.Class{facts.ClassTest}}
 	}
+	script := func(p string) facts.File { return facts.File{Path: p, Added: 5, Language: "Shell"} }
 	tests := []struct {
 		name       string
 		files      []facts.File
@@ -44,6 +45,10 @@ func TestUntestedUnpairedLanguages(t *testing.T) {
 		{"shell and yaml", []facts.File{prod("a.sh"), prod("deploy.yaml")}, []string{}, 0, 0, []string{}},
 		{"data and config, no test", []facts.File{prod("deploy.yaml"), prod("config/app.json"), prod("build/app.xml"), prod("release-roots")},
 			[]string{"Shell", "Terraform"}, 0, 0, []string{}},
+		// an extensionless script whose first line is a shell shebang is Shell
+		{"shebang script, shell tests in repo", []facts.File{script("scripts/deploy")}, []string{"Shell"}, 1, 10, []string{"scripts/deploy"}},
+		{"shebang script, no shell tests", []facts.File{script("scripts/deploy")}, []string{}, 0, 0, []string{}},
+		{"shebang script, a test changed", []facts.File{script("scripts/deploy"), test("x_test.go")}, []string{"Shell"}, 0, 0, []string{}},
 		{"go and yaml, no test", []facts.File{prod("main.go"), prod("deploy.yaml")}, []string{}, 1, 10, []string{"main.go"}},
 	}
 	for _, tt := range tests {

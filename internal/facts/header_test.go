@@ -1,6 +1,7 @@
 package facts
 
 import (
+	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -53,5 +54,90 @@ func TestWithClass(t *testing.T) {
 		if got := withClass(c.in, ClassGenerated); !reflect.DeepEqual(got, c.want) {
 			t.Errorf("withClass(%v, generated) = %v, want %v", c.in, got, c.want)
 		}
+	}
+}
+
+// TestShellShebang pins which first lines make an extensionless file a Shell
+// script: a shell interpreter by path or through env, arguments tolerated,
+// BOM and CRLF stripped; nothing else.
+func TestShellShebang(t *testing.T) {
+	for _, tt := range []struct {
+		content string
+		want    bool
+	}{
+		{"#!/bin/sh\ntrue\n", true},
+		{"#!/bin/bash\n", true},
+		{"#!/bin/dash\n", true},
+		{"#!/bin/zsh\n", true},
+		{"#!/bin/ksh\n", true},
+		{"#!/usr/bin/env bash\n", true},
+		{"#!/usr/bin/env sh\n", true},
+		{"#! /bin/bash -e\n", true},
+		{"#!/usr/bin/env -S bash -e\n", true},
+		{"#!/usr/bin/env LC_ALL=C bash\n", true},
+		{"\xef\xbb\xbf#!/bin/sh\r\necho\r\n", true},
+		{"#!/usr/bin/env python3\n", false},
+		{"#!/usr/bin/env node\n", false},
+		{"#!/usr/bin/python\n", false},
+		{"#!/bin/fish\n", false},
+		{"#!/usr/bin/env\n", false},
+		{"echo hi\n", false},
+		{"# !/bin/sh\n", false},
+		{"\n#!/bin/sh\n", false},
+		{"", false},
+		{"#!/bin/bash\n\x00binary", false},
+	} {
+		if got := ShellShebang([]byte(tt.content)); got != tt.want {
+			t.Errorf("ShellShebang(%q) = %v, want %v", tt.content, got, tt.want)
+		}
+	}
+}
+
+// TestReadmeDocumentsShebangs pins the README to the shebang rule: the Which
+// files count section names it with examples and every shell interpreter, the
+// Plan file section and the Tests row mention it.
+func TestReadmeDocumentsShebangs(t *testing.T) {
+	data, err := os.ReadFile("../../README.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(data)
+	section := func(heading string) string {
+		i := strings.Index(s, "\n"+heading+"\n")
+		if i < 0 {
+			t.Fatalf("README has no %q section", heading)
+		}
+		rest := s[i+len(heading)+2:]
+		level := strings.Index(heading, " ")
+		for j := 0; j < len(rest); j++ {
+			if (j == 0 || rest[j-1] == '\n') && strings.HasPrefix(rest[j:], "#") {
+				if len(rest[j:])-len(strings.TrimLeft(rest[j:], "#")) <= level {
+					return rest[:j]
+				}
+			}
+		}
+		return rest
+	}
+	which := section("#### Which files count")
+	wants := []string{"shebang", "`#!/bin/bash`", "`#!/usr/bin/env bash`", "`python3`", "`node`"}
+	for _, sh := range shellInterpreters {
+		wants = append(wants, "`"+sh+"`")
+	}
+	for _, w := range wants {
+		if !strings.Contains(which, w) {
+			t.Errorf("README Which files count lacks %s", w)
+		}
+	}
+	if !strings.Contains(section("### Plan file"), "shebang") {
+		t.Error("README Plan file section lacks shebang")
+	}
+	found := false
+	for _, line := range strings.Split(s, "\n") {
+		if strings.HasPrefix(line, "| Tests |") {
+			found = strings.Contains(line, "shebang")
+		}
+	}
+	if !found {
+		t.Error("README Tests row lacks shebang")
 	}
 }

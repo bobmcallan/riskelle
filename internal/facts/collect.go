@@ -50,8 +50,9 @@ func Collect(ctx context.Context, repo, base, head string) (Facts, error) {
 	for i := range files {
 		files[i].Classes = Classify(files[i].Path)
 	}
-	// A file whose head blob carries a generated marker is generated too.
-	if err := markGeneratedHeads(ctx, repo, headSHA, files); err != nil {
+	// A file whose head blob carries a generated marker is generated too; an
+	// extensionless one whose first line is a shell shebang is a Shell script.
+	if err := markHeads(ctx, repo, headSHA, files); err != nil {
 		return Facts{}, err
 	}
 	consequences, err := collectConsequences(ctx, repo, mergeBase, headSHA, files)
