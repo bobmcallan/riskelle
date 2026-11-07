@@ -126,11 +126,14 @@ an environment. A file is a pipeline definition when its path matches one of
 `**/azure-pipelines*.yaml`, `.azuredevops/**/*.yml`, `.azuredevops/**/*.yaml`,
 `**/pipelines/**/*.yml`, `**/pipelines/**/*.yaml`, `**/.pipelines/**/*.yml`,
 `**/.pipelines/**/*.yaml`, `**/azure-pipelines/**/*.yml`,
-`**/azure-pipelines/**/*.yaml`, `**/.azure-pipelines/**/*.yml` or
-`**/.azure-pipelines/**/*.yaml`, **and** it has one of these keys at column 0:
+`**/azure-pipelines/**/*.yaml`, `**/.azure-pipelines/**/*.yml`,
+`**/.azure-pipelines/**/*.yaml`, `**/templates/**/*.yml` or
+`**/templates/**/*.yaml`, **and** it has one of these keys at column 0:
 `jobs`, `stages`, `steps`, `extends`, `trigger`, `pr`, `resources`,
 `schedules`, `variables`, `parameters` or `on` (a docker-compose or Helm file
-has none).
+has none). Azure Pipelines templates conventionally live in a `templates/`
+folder; a Helm chart's `templates/` has none of these keys at column 0 and no
+catalogued key, so it carries nothing.
 
 - A changed line carries the class when its key, or a key it is nested under,
   is a catalogued key. Keys match case-insensitively, and the consequence's

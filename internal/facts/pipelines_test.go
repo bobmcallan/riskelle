@@ -47,6 +47,18 @@ func TestPipelineIdentity(t *testing.T) {
 		{"id-token quoted with comment", "on: push\npermissions:\n  'id-token': \"write\" # oidc\n", []string{"03:id-token: write"}},
 		{"write-all", "on: push\npermissions: write-all\n", []string{"02:permissions: write-all"}},
 		{"crlf", "jobs:\r\n- deployment: D\r\n  environment: prod\r\n", []string{"03:environment"}},
+		// Azure template
+		{"azure template", "parameters:\n- name: environment\n  type: string\n- name: serviceConnection\n  type: string\n" +
+			"stages:\n- stage: Release\n  jobs:\n  - deployment: Apply\n    environment: ${{ parameters.environment }}\n" +
+			"    strategy:\n      runOnce:\n        deploy:\n          steps:\n          - task: AzureCLI@2\n            inputs:\n" +
+			"              azureSubscription: ${{ parameters.serviceConnection }}\n",
+			[]string{"10:environment", "17:azureSubscription"}},
+		// Helm: unsigned, or signed with no catalogued key
+		{"helm deployment", "{{- if .Values.enabled }}\napiVersion: apps/v1\nkind: Deployment\nmetadata:\n  labels:\n" +
+			"    environment: {{ .Values.environment }}\nspec:\n  template:\n    spec:\n      containers:\n      - name: app\n" +
+			"        env:\n        - name: ENVIRONMENT\n          value: {{ .Values.environment }}\n{{- end }}\n", nil},
+		{"helm storage class", "apiVersion: storage.k8s.io/v1\nkind: StorageClass\nmetadata:\n  labels:\n    environment: prod\n" +
+			"parameters:\n  type: gp3\n", nil},
 		// AC2: no marks
 		{"docker-compose", "services:\n  app:\n    environment:\n      - FOO=bar\n", nil},
 		{"variables environment", "variables:\n  environment: dev\n", nil},
@@ -77,20 +89,26 @@ func TestPipelineIdentity(t *testing.T) {
 
 func TestIsPipeline(t *testing.T) {
 	for p, want := range map[string]bool{
-		".github/workflows/deploy.yml":      true,
-		".github/workflows/ci.yaml":         true,
-		"azure-pipelines.yml":               true,
-		"build/azure-pipelines-ci.yaml":     true,
-		".azuredevops/release.yml":          true,
-		"pipelines/release.yml":             true,
-		"infra/pipelines/stages/deploy.yml": true,
-		".pipelines/build.yaml":             true,
-		"azure-pipelines/templates/a.yml":   true,
-		"docker-compose.yml":                false,
-		"k8s/deploy.yaml":                   false,
-		".github/actions/x/action.yml":      false,
-		".github/workflows/sub/x.yml":       false,
-		"pipelines/README.md":               false,
+		".github/workflows/deploy.yml":         true,
+		".github/workflows/ci.yaml":            true,
+		"azure-pipelines.yml":                  true,
+		"build/azure-pipelines-ci.yaml":        true,
+		".azuredevops/release.yml":             true,
+		"pipelines/release.yml":                true,
+		"infra/pipelines/stages/deploy.yml":    true,
+		".pipelines/build.yaml":                true,
+		"azure-pipelines/templates/a.yml":      true,
+		"docker-compose.yml":                   false,
+		"k8s/deploy.yaml":                      false,
+		".github/actions/x/action.yml":         false,
+		".github/workflows/sub/x.yml":          false,
+		"pipelines/README.md":                  false,
+		"templates/terraform-release.yml":      true,
+		"templates/pr-review.yaml":             true,
+		"build/templates/stages/deploy.yml":    true,
+		"charts/app/templates/deployment.yaml": true,
+		"templates/README.md":                  false,
+		"templates/app.json":                   false,
 	} {
 		if got := isPipeline(p); got != want {
 			t.Errorf("isPipeline(%q) = %v, want %v", p, got, want)

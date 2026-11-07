@@ -6,8 +6,10 @@ import (
 )
 
 // pipelineDefinitions are the paths a CI/CD pipeline definition lives at:
-// GitHub Actions workflows and Azure Pipelines YAML. A file there is read for
-// pipeline_identity only when it also carries a pipelineSignature key.
+// GitHub Actions workflows, Azure Pipelines YAML and the templates/ folders
+// Azure Pipelines templates conventionally live in. A file there is read for
+// pipeline_identity only when it also carries a pipelineSignature key, so a
+// Helm chart's templates/ carries nothing.
 var pipelineDefinitions = []string{
 	".github/workflows/*.yml", ".github/workflows/*.yaml",
 	"**/azure-pipelines*.yml", "**/azure-pipelines*.yaml",
@@ -16,6 +18,7 @@ var pipelineDefinitions = []string{
 	"**/.pipelines/**/*.yml", "**/.pipelines/**/*.yaml",
 	"**/azure-pipelines/**/*.yml", "**/azure-pipelines/**/*.yaml",
 	"**/.azure-pipelines/**/*.yml", "**/.azure-pipelines/**/*.yaml",
+	"**/templates/**/*.yml", "**/templates/**/*.yaml",
 }
 
 // pipelineSignature are the column-0 keys of which a pipeline definition has
