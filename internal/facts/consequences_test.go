@@ -233,6 +233,14 @@ func TestReadmeListsConsequences(t *testing.T) {
 			t.Errorf("README Consequences does not list pipeline path `%s`", g)
 		}
 	}
+	for _, s := range []string{".tfvars", "variable", "description"} {
+		if !strings.Contains(cons, "`"+s+"`") {
+			t.Errorf("README Consequences does not name `%s`", s)
+		}
+	}
+	if !strings.Contains(cons, "via var.") {
+		t.Error("README Consequences does not describe the via var. type")
+	}
 	for _, s := range []string{"resource", "data", ".tf"} {
 		if !strings.Contains(cons, "`"+s+"`") {
 			t.Errorf("README Consequences does not name `%s`", s)
@@ -240,5 +248,89 @@ func TestReadmeListsConsequences(t *testing.T) {
 	}
 	if !strings.Contains(section("### Plan file"), "`consequences`") {
 		t.Error("README Plan file does not name `consequences`")
+	}
+}
+
+func TestTfvarsAssignments(t *testing.T) {
+	src := []struct{ line, name string }{
+		{`ref = "refs/heads/main"`, "ref"},
+		{`roots = [`, "roots"},
+		{`  "a",`, "roots"},
+		{`  # note`, ""},
+		{`]`, "roots"},
+		{``, ""},
+		{`# a comment`, ""},
+		{`tags = {`, "tags"},
+		{`  env = "prod"`, "tags"},
+		{`}`, "tags"},
+		{`policy = <<EOT`, "policy"},
+		{`x = 1`, "policy"},
+		{`EOT`, "policy"},
+		{`count = 2`, "count"},
+	}
+	var text []string
+	for _, l := range src {
+		text = append(text, l.line)
+	}
+	got := tfvarsAssignments([]byte(strings.Join(text, "\n")))
+	for i, l := range src {
+		if got[i] != l.name {
+			t.Errorf("line %d %q: %q, want %q", i+1, l.line, got[i], l.name)
+		}
+	}
+}
+
+func TestTerraformVariables(t *testing.T) {
+	src := []struct{ line, variable, attr, block string }{
+		{`variable "ref" {`, "ref", "", ""},
+		{`  description = "the ref"`, "ref", "description", ""},
+		{`  type        = string`, "ref", "type", ""},
+		{`  default     = "refs/heads/main"`, "ref", "default", ""},
+		{`  validation {`, "ref", "validation", ""},
+		{`    condition     = can(regex("^refs/", var.ref))`, "ref", "validation", ""},
+		{`    error_message = <<EOT`, "ref", "validation", ""},
+		{`bad`, "ref", "validation", ""},
+		{`EOT`, "ref", "validation", ""},
+		{`  }`, "ref", "validation", ""},
+		{`}`, "ref", "", ""},
+		{`variable "y" {}`, "y", "", ""},
+		{`resource "azuredevops_check_required_template" "r" {`, "", "", "azuredevops_check_required_template"},
+		{`  required_template {`, "", "required_template", "azuredevops_check_required_template"},
+		{`    repository_ref = var.ref`, "", "required_template", "azuredevops_check_required_template"},
+		{`  }`, "", "required_template", "azuredevops_check_required_template"},
+		{`}`, "", "", "azuredevops_check_required_template"},
+	}
+	var text []string
+	for _, l := range src {
+		text = append(text, l.line)
+	}
+	got := terraformBlocks([]byte(strings.Join(text, "\n")))
+	for i, l := range src {
+		if want := (tfLine{l.block, l.attr, l.variable}); got[i] != want {
+			t.Errorf("line %d %q: %+v, want %+v", i+1, l.line, got[i], want)
+		}
+	}
+}
+
+func TestRefersTo(t *testing.T) {
+	for line, want := range map[string]bool{
+		`  repository_ref = var.x`:         true,
+		`  name = "${var.x}"`:              true,
+		`  a = var.x.y`:                    true,
+		`  a = var.x[0]`:                   true,
+		`  a = upper(var.x)`:               true,
+		`var.x`:                            true,
+		`  a = var.x_y`:                    false,
+		`  a = var.x-y`:                    false,
+		`  a = local.var.x`:                false,
+		`  # a = var.x`:                    false,
+		`  // var.x`:                       false,
+		`  a = var.xy`:                     false,
+		`  a = var.xy, b = var.x`:          true,
+		`  a = "var.x"  # textual matches`: true,
+	} {
+		if got := refersTo(line, "x"); got != want {
+			t.Errorf("refersTo(%q, x) = %v, want %v", line, got, want)
+		}
 	}
 }

@@ -128,9 +128,22 @@ or absolute glob are refused by name: a repo class can only raise the level.
   indent of the block's first indented line. Blank lines, comments between
   attributes, other arguments (such as `description` or `display_name`) and
   nested blocks (such as `lifecycle`) carry none.
-- For `identity_rights`, only `.tf` files are read, and in them only `resource`
-  and `data` blocks of a catalogued type. A mention of a type in any other file
-  never counts.
+- For `identity_rights`, only `.tf` and `.tfvars` files are read, and in them
+  only `resource` and `data` blocks of a catalogued type. A mention of a type
+  in any other file never counts.
+- A changed variable carries the classes of the blocks that use it. A changed
+  line sets variable `X` when it is an `X = …` assignment (or its multi-line
+  value) in a `.tfvars` file (not `.tfvars.json`), or a line in any top-level
+  attribute except `description` of a `variable` block (`variable "X"`) in a
+  `.tf` file.
+  It carries every class of the catalogued `resource` and `data` blocks in the
+  `.tf` files of the same directory, read at the same side's commit, with a
+  line referencing `var.X` (for a type listed with attributes, the line must
+  fall in one of them). The consequence names the changed variable file and
+  the type as `<type> via var.X`. A `description`-only change, blank lines and
+  comments carry nothing. Only the same directory is read: module inputs,
+  `-var-file` files elsewhere and `locals` indirection are not traced, and the
+  match is textual (full-line comments are skipped).
 - A block carries its class when any line in it is added, removed or altered:
   added lines are read at head, removed ones at the merge base. A rename is
   checked at both paths.

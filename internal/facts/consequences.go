@@ -3,6 +3,7 @@ package facts
 import (
 	"bytes"
 	"context"
+	"path"
 	"regexp"
 	"sort"
 	"strconv"
@@ -19,7 +20,8 @@ const (
 
 // Consequence is one class a change carries, the changed or planned paths
 // that triggered it and the Terraform block types (with ".<attribute>" when
-// an attribute of the block carried it) or pipeline keys that did. Both lists are sorted,
+// an attribute of the block carried it, and " via var.<name>" when a changed
+// variable that the block uses did) or pipeline keys that did. Both lists are sorted,
 // distinct and non-nil; Types is empty for a plan, which has no content.
 type Consequence struct {
 	Class string   `json:"class"`
@@ -141,13 +143,83 @@ func consequencesOf(typ string) []string {
 	return out
 }
 
+// variableHeader matches a variable block header at column 0.
+var variableHeader = regexp.MustCompile(`^variable[ \t]+"?([A-Za-z_][A-Za-z0-9_-]*)"?`)
+
+// tfvarsAssign matches a column-0 variable assignment in a .tfvars file.
+var tfvarsAssign = regexp.MustCompile(`^([A-Za-z_][A-Za-z0-9_-]*)[ \t]*=`)
+
+// tfvarsAssignments returns, for each line of a .tfvars file, the variable
+// whose assignment it falls in, or "": a column-0 "X =" line opens X;
+// indented lines and a heredoc body continue it; a column-0 line starting
+// with "]", "}" or ")" continues and closes it; blank and comment lines carry
+// none; any other column-0 line closes it.
+func tfvarsAssignments(content []byte) []string {
+	lines := strings.Split(string(content), "\n")
+	out := make([]string, len(lines))
+	open, heredoc := "", ""
+	for i, l := range lines {
+		switch {
+		case heredoc != "":
+			out[i] = open
+			if strings.TrimSpace(l) == heredoc {
+				heredoc = ""
+			}
+			continue
+		case strings.TrimSpace(l) == "" || strings.HasPrefix(strings.TrimSpace(l), "#") ||
+			strings.HasPrefix(strings.TrimSpace(l), "//") || strings.HasPrefix(strings.TrimSpace(l), "/*"):
+		case l[0] == ' ' || l[0] == '\t':
+			out[i] = open
+		case strings.ContainsAny(l[:1], "])}"):
+			out[i], open = open, ""
+		default:
+			open = ""
+			if m := tfvarsAssign.FindStringSubmatch(l); m != nil {
+				open = m[1]
+			}
+			out[i] = open
+		}
+		if m := heredocStart.FindStringSubmatch(l); m != nil && out[i] != "" {
+			heredoc = m[1]
+		}
+	}
+	return out
+}
+
+// refersTo reports whether a line that is not a full-line comment references
+// var.<name> as a whole identifier: not preceded by an identifier character
+// or ".", nor followed by an identifier character.
+func refersTo(line, name string) bool {
+	t := strings.TrimSpace(line)
+	if strings.HasPrefix(t, "#") || strings.HasPrefix(t, "//") || strings.HasPrefix(t, "/*") {
+		return false
+	}
+	ref := "var." + name
+	ident := func(b byte) bool {
+		return b == '_' || b == '-' || b >= '0' && b <= '9' || b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z'
+	}
+	for i := 0; ; {
+		j := strings.Index(line[i:], ref)
+		if j < 0 {
+			return false
+		}
+		j += i
+		end := j + len(ref)
+		if (j == 0 || !ident(line[j-1]) && line[j-1] != '.') && (end == len(line) || !ident(line[end])) {
+			return true
+		}
+		i = j + 1
+	}
+}
+
 // blockHeader matches a resource or data block header at column 0.
 var blockHeader = regexp.MustCompile(`^(?:resource|data)[ \t]+"?([A-Za-z][A-Za-z0-9_-]*)"?`)
 
 // tfLine is one line of a Terraform file: the resource or data type of the
 // top-level block it belongs to, and the block's top-level attribute it falls
-// in ("" when none).
-type tfLine struct{ block, attr string }
+// in ("" when none). variable names the column-0 variable "X" block a line
+// belongs to, whose attributes are tracked the same way; "" otherwise.
+type tfLine struct{ block, attr, variable string }
 
 // tfAttr matches the identifier that opens a top-level attribute line.
 var tfAttr = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_-]*`)
@@ -172,47 +244,50 @@ var tfAttr = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_-]*`)
 func terraformBlocks(content []byte) []tfLine {
 	lines := strings.Split(string(content), "\n")
 	out := make([]tfLine, len(lines))
-	open, heredoc, attr, col := "", "", "", -1
+	open, vname, heredoc, attr, col := "", "", "", "", -1
 	for i, l := range lines {
 		trimmed := strings.TrimLeft(l, " \t")
 		switch {
 		case heredoc != "":
-			out[i] = tfLine{open, attr}
+			out[i] = tfLine{open, attr, vname}
 			if strings.TrimSpace(l) == heredoc {
 				heredoc = ""
 			}
 			continue
 		case strings.TrimSpace(l) == "" || strings.HasPrefix(l, "#") || strings.HasPrefix(l, "//") || strings.HasPrefix(l, "/*"):
-			out[i] = tfLine{open, ""}
+			out[i] = tfLine{open, "", vname}
 		case l[0] == ' ' || l[0] == '\t':
 			indent := len(l) - len(trimmed)
 			if col < 0 {
 				col = indent
 			}
+			tracked := open != "" || vname != ""
 			switch {
-			case open == "" || indent > col:
+			case !tracked || indent > col:
 			case strings.ContainsAny(trimmed[:1], "])}"):
-				out[i] = tfLine{open, attr}
+				out[i] = tfLine{open, attr, vname}
 				attr = ""
 				continue
 			default:
 				attr = tfAttr.FindString(trimmed)
 			}
-			if open == "" {
+			if !tracked {
 				attr = ""
 			}
-			out[i] = tfLine{open, attr}
+			out[i] = tfLine{open, attr, vname}
 		case l[0] == '}':
-			out[i] = tfLine{open, ""}
-			open, attr, col = "", "", -1
+			out[i] = tfLine{open, "", vname}
+			open, vname, attr, col = "", "", "", -1
 		default:
-			open, attr, col = "", "", -1
+			open, vname, attr, col = "", "", "", -1
 			if m := blockHeader.FindStringSubmatch(l); m != nil {
 				open = m[1]
+			} else if m := variableHeader.FindStringSubmatch(l); m != nil {
+				vname = m[1]
 			}
-			out[i] = tfLine{open, ""}
+			out[i] = tfLine{open, "", vname}
 			if strings.HasSuffix(strings.TrimRight(l, " \t\r"), "}") {
-				open = "" // a one-line block
+				open, vname = "", "" // a one-line block
 			}
 		}
 		if m := heredocStart.FindStringSubmatch(l); m != nil {
@@ -265,6 +340,10 @@ func span(start, count string) []int {
 // type of the block it sits in, and a catalogued type adds its class with
 // that side's path and the type. In a pipeline definition a line's
 // pipelineIdentity mark adds pipeline_identity with the path and the mark.
+// A changed line that sets variable X (an assignment in a .tfvars file, or a
+// line in a variable "X" block's attributes other than description) adds the
+// classes of the catalogued blocks in that directory's .tf files, at the same
+// side, that reference var.X, with the changed path and "<type> via var.X".
 // No other file is read. Nil when there are none.
 func collectConsequences(ctx context.Context, repo, mergeBase, head string, files []File) ([]Consequence, error) {
 	type side struct {
@@ -330,8 +409,30 @@ func collectConsequences(ctx context.Context, repo, mergeBase, head string, file
 			h.paths[p] = true
 			h.types[typ] = true
 		}
+		// vars records, by directory, each variable a changed line sets and
+		// the changed paths that set it.
+		vars := map[string]map[string]map[string]bool{}
+		setVar := func(p, name string) {
+			dir := path.Dir(p)
+			if vars[dir] == nil {
+				vars[dir] = map[string]map[string]bool{}
+			}
+			if vars[dir][name] == nil {
+				vars[dir][name] = map[string]bool{}
+			}
+			vars[dir][name][p] = true
+		}
 		err = catBlobs(ctx, repo, blobs, func(p string, content []byte) {
 			content = bytes.TrimSuffix(content, []byte("\n"))
+			if isTfvars(p) {
+				names := tfvarsAssignments(content)
+				for _, n := range want[p] {
+					if n >= 1 && n <= len(names) && names[n-1] != "" {
+						setVar(p, names[n-1])
+					}
+				}
+				return
+			}
 			if !isTerraform(p) {
 				marks := pipelineIdentity(content)
 				for _, n := range want[p] {
@@ -343,7 +444,13 @@ func collectConsequences(ctx context.Context, repo, mergeBase, head string, file
 			}
 			lines := terraformBlocks(content)
 			for _, n := range want[p] {
-				if n < 1 || n > len(lines) || lines[n-1].block == "" {
+				if n < 1 || n > len(lines) {
+					continue
+				}
+				if v := lines[n-1]; v.variable != "" && v.attr != "" && v.attr != "description" {
+					setVar(p, v.variable)
+				}
+				if lines[n-1].block == "" {
 					continue
 				}
 				l := lines[n-1]
@@ -352,6 +459,39 @@ func collectConsequences(ctx context.Context, repo, mergeBase, head string, file
 				}
 				for _, class := range attributeConsequencesOf(l.block, l.attr) {
 					hit(class, p, l.block+"."+l.attr)
+				}
+			}
+		})
+		if err != nil {
+			return nil, err
+		}
+		if len(vars) == 0 {
+			continue
+		}
+		// A changed variable carries the classes of the catalogued blocks
+		// in the .tf files of its directory, at this side, that use it.
+		var users []blob
+		for _, b := range all {
+			if isTerraform(b.path) && vars[path.Dir(b.path)] != nil {
+				users = append(users, b)
+			}
+		}
+		err = catBlobs(ctx, repo, users, func(p string, content []byte) {
+			content = bytes.TrimSuffix(content, []byte("\n"))
+			lines, text := terraformBlocks(content), strings.Split(string(content), "\n")
+			for name, changed := range vars[path.Dir(p)] {
+				for i, l := range lines {
+					if l.block == "" || !refersTo(text[i], name) {
+						continue
+					}
+					for cp := range changed {
+						for _, class := range consequencesOf(l.block) {
+							hit(class, cp, l.block+" via var."+name)
+						}
+						for _, class := range attributeConsequencesOf(l.block, l.attr) {
+							hit(class, cp, l.block+"."+l.attr+" via var."+name)
+						}
+					}
 				}
 			}
 		})
@@ -373,8 +513,11 @@ func collectConsequences(ctx context.Context, repo, mergeBase, head string, file
 // isTerraform reports whether a path is a Terraform configuration file.
 func isTerraform(p string) bool { return strings.HasSuffix(p, ".tf") }
 
+// isTfvars reports whether a path is a Terraform variable definitions file.
+func isTfvars(p string) bool { return strings.HasSuffix(p, ".tfvars") }
+
 // readable reports whether collectConsequences reads a path.
-func readable(p string) bool { return isTerraform(p) || isPipeline(p) }
+func readable(p string) bool { return isTerraform(p) || isTfvars(p) || isPipeline(p) }
 
 // plannedConsequences gives each class a planned path names that path, with
 // no types. Nil when no path names one.
