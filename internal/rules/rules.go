@@ -49,6 +49,17 @@ type File struct {
 	// triggering path lies under one is floored at the highest level, so a
 	// root can only raise a floor.
 	ProductionRoots []string `json:"production_roots"`
+
+	// Repo consequence classes, by name: a changed or planned path matching a
+	// class's globs carries it, floored at Medium or High. A built-in class
+	// name and a Low floor are refused by name (see Parse).
+	ConsequenceClasses map[string]ConsequenceClass `json:"consequence_classes"`
+}
+
+// ConsequenceClass is one repo consequence class in a File.
+type ConsequenceClass struct {
+	Paths []string `json:"paths"`
+	Floor string   `json:"floor"`
 }
 
 // toggle is one exclusion toggle: its key, the class it governs and its value
@@ -66,7 +77,7 @@ var toggles = []toggle{
 	{"exclude_log_files", facts.ClassRunRecord, func(f File) *bool { return f.ExcludeLogFiles }},
 }
 
-// areaName is what an area name may be.
+// areaName is what an area or repo consequence class name may be.
 var areaName = regexp.MustCompile(`^[a-z][a-z0-9_-]*$`)
 
 // refused holds the lower-cased JSON keys of the built-in settings that File
@@ -137,7 +148,43 @@ func Parse(data []byte) (File, error) {
 			return File{}, err
 		}
 	}
+	if err := checkClasses(f.ConsequenceClasses); err != nil {
+		return File{}, err
+	}
 	return f, nil
+}
+
+// checkClasses refuses, in sorted name order, a repo consequence class with an
+// invalid or built-in name, no or invalid globs, or a floor that is not a
+// level above the lowest.
+func checkClasses(classes map[string]ConsequenceClass) error {
+	levels := score.Default().Levels
+	var raise []string
+	for _, e := range levels[1:] {
+		raise = append(raise, string(e.Level))
+	}
+	for _, name := range slices.Sorted(maps.Keys(classes)) {
+		c := classes[name]
+		switch {
+		case !areaName.MatchString(name):
+			return fmt.Errorf("consequence_classes: invalid name %q", name)
+		case facts.IsConsequence(name):
+			return fmt.Errorf("consequence_classes: refused %q: a built-in class; %s may not redefine or lower it", name, Path)
+		case len(c.Paths) == 0:
+			return fmt.Errorf("consequence_classes.%s: no patterns", name)
+		}
+		if err := checkPatterns("consequence_classes."+name+".paths", c.Paths); err != nil {
+			return err
+		}
+		if c.Floor == string(levels[0].Level) {
+			return fmt.Errorf("consequence_classes.%s: floor %q refused: a repo class may only raise the level, to %s",
+				name, c.Floor, strings.Join(raise, " or "))
+		}
+		if !slices.Contains(raise, c.Floor) {
+			return fmt.Errorf("consequence_classes.%s: unknown floor %q (want %s)", name, c.Floor, strings.Join(raise, " or "))
+		}
+	}
+	return nil
 }
 
 // checkPatterns refuses an empty or absolute pattern, naming field and index.
@@ -204,7 +251,9 @@ func checkToggles(data []byte) error {
 // Apply returns r with the file's additions merged in: Generated becomes the
 // sorted, de-duplicated union of both, nil when empty, as does
 // ProductionRoots, and so does each area's
-// patterns in Areas, a fresh map nil when empty. Each exclusion toggle that
+// patterns in Areas, a fresh map nil when empty. Repo consequence classes
+// become RepoClasses, sorted by class with their globs sorted and
+// de-duplicated, nil when none. Each exclusion toggle that
 // is absent or true adds its class to SizeExcludes once; one set to false
 // removes it, so its files count. r is not changed.
 func Apply(r score.Rules, f File) score.Rules {
@@ -229,6 +278,12 @@ func Apply(r score.Rules, f File) score.Rules {
 		}
 	}
 	r.Areas = areas
+	var classes []score.RepoClass
+	for _, name := range slices.Sorted(maps.Keys(f.ConsequenceClasses)) {
+		c := f.ConsequenceClasses[name]
+		classes = append(classes, score.RepoClass{Class: name, Paths: union(nil, c.Paths), Floor: score.Level(c.Floor)})
+	}
+	r.RepoClasses = classes
 	return r
 }
 

@@ -32,6 +32,14 @@ type LevelEdge struct {
 
 // Floor is the lowest level a change carrying a consequence class is
 // reported at. A floor only raises the level; it never adds points.
+// RepoClass is a consequence class a repo names in .risk/rules.json: the path
+// globs that carry it and its floor.
+type RepoClass struct {
+	Class string   `json:"class"`
+	Paths []string `json:"paths"`
+	Floor Level    `json:"floor"`
+}
+
 type Floor struct {
 	Class string `json:"class"` // a facts consequence class
 	Level Level  `json:"level"`
@@ -66,6 +74,11 @@ type Rules struct {
 	// consequence with a path under one is floored at the highest level.
 	// Omitted when empty, so the built-in rules hash as before.
 	ProductionRoots []string `json:"production_roots,omitempty"`
+
+	// Repo consequence classes (.risk/rules.json): a class whose path globs
+	// match a changed or planned path carries it, floored at its level
+	// (Medium or High). Sorted by class; nil when none.
+	RepoClasses []RepoClass `json:"consequence_classes,omitempty"`
 
 	// Repo-added sensitive areas (.risk/rules.json): globs by area name,
 	// beside the built-in areas in facts. Report context only, never scored;

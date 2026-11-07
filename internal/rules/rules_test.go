@@ -48,6 +48,23 @@ func TestParse(t *testing.T) {
 		{`{"production_roots":["prod-tenant/"]}`, File{}, `production_roots[0] "prod-tenant/": a production root names a directory`},
 		{`{"production_roots":"prod-tenant/**"}`, File{}, "production_roots"},
 		{`{"areas":["x"]}`, File{}, "cannot unmarshal"},
+		{`{"consequence_classes":{"release_guard":{"paths":["scripts/plan-guard-allow*"],"floor":"Medium"}}}`,
+			File{ConsequenceClasses: map[string]ConsequenceClass{"release_guard": {Paths: []string{"scripts/plan-guard-allow*"}, Floor: "Medium"}}}, ""},
+		{`{"consequence_classes":{"release_guard":{"paths":["x/**"],"floor":"High"}}}`,
+			File{ConsequenceClasses: map[string]ConsequenceClass{"release_guard": {Paths: []string{"x/**"}, Floor: "High"}}}, ""},
+		{`{"consequence_classes":{"identity_rights":{"paths":["x"],"floor":"Medium"}}}`, File{},
+			`consequence_classes: refused "identity_rights": a built-in class; .risk/rules.json may not redefine or lower it`},
+		{`{"consequence_classes":{"pipeline_identity":{"paths":["x"],"floor":"High"}}}`, File{}, `consequence_classes: refused "pipeline_identity"`},
+		{`{"consequence_classes":{"g":{"paths":["x"],"floor":"Low"}}}`, File{},
+			`consequence_classes.g: floor "Low" refused: a repo class may only raise the level, to Medium or High`},
+		{`{"consequence_classes":{"g":{"paths":["x"],"floor":"Critical"}}}`, File{}, `consequence_classes.g: unknown floor "Critical" (want Medium or High)`},
+		{`{"consequence_classes":{"g":{"paths":["x"],"floor":"medium"}}}`, File{}, `consequence_classes.g: unknown floor "medium"`},
+		{`{"consequence_classes":{"g":{"paths":["x"]}}}`, File{}, `consequence_classes.g: unknown floor ""`},
+		{`{"consequence_classes":{"g":{"paths":[],"floor":"High"}}}`, File{}, "consequence_classes.g: no patterns"},
+		{`{"consequence_classes":{"g":{"paths":[""],"floor":"High"}}}`, File{}, "consequence_classes.g.paths[0]: empty pattern"},
+		{`{"consequence_classes":{"g":{"paths":["/x"],"floor":"High"}}}`, File{}, `consequence_classes.g.paths[0] "/x": patterns are repo-relative`},
+		{`{"consequence_classes":{"Guard":{"paths":["x"],"floor":"High"}}}`, File{}, `consequence_classes: invalid name "Guard"`},
+		{`{"consequence_classes":{"g":{"paths":["x"],"floor":"High","level":"Low"}}}`, File{}, `unknown field "level"`},
 		{`{"exclude_log_files":false}`, File{ExcludeLogFiles: ptr(false)}, ""},
 		{`{"exclude_log_files":true,"exclude_non_code_files":false}`,
 			File{ExcludeLogFiles: ptr(true), ExcludeNonCodeFiles: ptr(false)}, ""},
@@ -260,8 +277,9 @@ func TestHashRecordsProductionRoots(t *testing.T) {
 	}
 }
 
-// TestReadmeDocumentsProductionRoots pins the README's production roots
-// wording in Rules, Consequences and Report.
+// TestReadmeDocumentsProductionRoots pins the README's production roots and
+// repo consequence classes wording in Rules, Consequences, Report and Plan
+// file.
 func TestReadmeDocumentsProductionRoots(t *testing.T) {
 	data, err := os.ReadFile("../../README.md")
 	if err != nil {
@@ -285,15 +303,58 @@ func TestReadmeDocumentsProductionRoots(t *testing.T) {
 		return s
 	}
 	for heading, wants := range map[string][]string{
-		"## Rules":         {"`production_roots`", "/**"},
-		"### Consequences": {"`production_roots`", "High"},
+		"## Rules":         {"`production_roots`", "/**", "`consequence_classes`"},
+		"### Consequences": {"`production_roots`", "High", "`consequence_classes`", "Medium or High"},
 		"### Report":       {`"production_roots"`},
+		"### Plan file":    {"repo class"},
 	} {
 		sec := section(heading)
 		for _, w := range wants {
 			if !strings.Contains(sec, w) {
 				t.Errorf("README %s lacks %s", heading, w)
 			}
+		}
+	}
+}
+
+func TestApplyRepoClasses(t *testing.T) {
+	f := File{ConsequenceClasses: map[string]ConsequenceClass{
+		"release_roots": {Paths: []string{"release-roots"}, Floor: "Medium"},
+		"guard":         {Paths: []string{"b/**", "a/**", "b/**"}, Floor: "High"},
+	}}
+	got := Apply(score.Default(), f)
+	want := []score.RepoClass{
+		{Class: "guard", Paths: []string{"a/**", "b/**"}, Floor: score.High},
+		{Class: "release_roots", Paths: []string{"release-roots"}, Floor: score.Medium},
+	}
+	if !reflect.DeepEqual(got.RepoClasses, want) {
+		t.Errorf("RepoClasses = %+v, want %+v", got.RepoClasses, want)
+	}
+	if f.ConsequenceClasses["guard"].Paths[0] != "b/**" {
+		t.Error("Apply changed its input")
+	}
+	if Apply(score.Default(), File{}).RepoClasses != nil {
+		t.Error("RepoClasses not nil with none")
+	}
+}
+
+func TestHashRecordsRepoClasses(t *testing.T) {
+	cls := func(floor string, paths ...string) File {
+		return File{ConsequenceClasses: map[string]ConsequenceClass{"guard": {Paths: paths, Floor: floor}}}
+	}
+	one, two := Apply(score.Default(), cls("Medium", "a/**", "b/**")), Apply(score.Default(), cls("Medium", "b/**", "a/**"))
+	if Hash(one) != Hash(two) {
+		t.Error("globs in another order hash differently")
+	}
+	if Hash(one) == Hash(score.Default()) {
+		t.Error("a repo class does not change the hash")
+	}
+	if Hash(one) == Hash(Apply(score.Default(), cls("High", "a/**", "b/**"))) {
+		t.Error("a repo class's floor does not change the hash")
+	}
+	for _, r := range []score.Rules{score.Default(), Apply(score.Default(), File{})} {
+		if b, _ := json.Marshal(r); strings.Contains(string(b), "consequence_classes") {
+			t.Errorf("rules without classes marshal a consequence_classes key: %s", b)
 		}
 	}
 }

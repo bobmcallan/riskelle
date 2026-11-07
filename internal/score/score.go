@@ -128,15 +128,19 @@ func Score(f facts.Facts, r Rules) Result {
 	}
 }
 
-// consequences gives each consequence in the facts, in their order, its floor
-// from the rules, copying its lists so the result aliases nothing. A class
-// with no floor gets the lowest level, so it is reported and raises nothing.
-// A consequence with any path under a production root is floored at the
-// highest level instead, naming those roots. Nil when the facts carry none.
+// consequences gives each consequence in the facts, and each repo class a
+// changed or planned path carries (repoConsequences), sorted by class, its
+// floor from the rules: the built-in floor or the repo class's, copying its
+// lists so the result aliases nothing. A class with no floor gets the lowest
+// level, so it is reported and raises nothing. A consequence with any path
+// under a production root is floored at the highest level instead, naming
+// those roots. Nil when there are none.
 func consequences(f facts.Facts, r Rules) []Consequence {
-	if len(f.Consequences) == 0 {
+	found := append(append([]facts.Consequence{}, f.Consequences...), repoConsequences(f.Files, r.RepoClasses)...)
+	if len(found) == 0 {
 		return nil
 	}
+	sort.SliceStable(found, func(i, j int) bool { return found[i].Class < found[j].Class })
 	lowest := Level("")
 	if len(r.Levels) > 0 {
 		lowest = r.Levels[0].Level
@@ -145,12 +149,17 @@ func consequences(f facts.Facts, r Rules) []Consequence {
 	for i, root := range r.ProductionRoots {
 		roots[i] = facts.CompileGlobs([]string{root})
 	}
-	out := make([]Consequence, 0, len(f.Consequences))
-	for _, c := range f.Consequences {
+	out := make([]Consequence, 0, len(found))
+	for _, c := range found {
 		floor := lowest
 		for _, fl := range r.ConsequenceFloors {
 			if fl.Class == c.Class {
 				floor = fl.Level
+			}
+		}
+		for _, rc := range r.RepoClasses {
+			if rc.Class == c.Class {
+				floor = rc.Floor
 			}
 		}
 		var in []string
@@ -174,6 +183,34 @@ func consequences(f facts.Facts, r Rules) []Consequence {
 			Floor:           floor,
 			ProductionRoots: in,
 		})
+	}
+	return out
+}
+
+// repoConsequences gives each repo class, in rules order, the changed or
+// planned paths its globs match, at the head path and the old path of a
+// rename; a class read from paths alone has no types. Nil when none matches.
+func repoConsequences(files []facts.File, classes []RepoClass) []facts.Consequence {
+	var out []facts.Consequence
+	for _, rc := range classes {
+		g := facts.CompileGlobs(rc.Paths)
+		set := map[string]bool{}
+		for _, file := range files {
+			for _, p := range []string{file.Path, file.OldPath} {
+				if p != "" && g.Match(p) {
+					set[p] = true
+				}
+			}
+		}
+		if len(set) == 0 {
+			continue
+		}
+		paths := make([]string, 0, len(set))
+		for p := range set {
+			paths = append(paths, p)
+		}
+		sort.Strings(paths)
+		out = append(out, facts.Consequence{Class: rc.Class, Paths: paths, Types: []string{}})
 	}
 	return out
 }

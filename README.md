@@ -97,6 +97,18 @@ roots. The total is unchanged. Roots are read from the target branch like every
 rule, recorded in the rules hash, and change nothing for a change with no
 consequence in them.
 
+**Repo classes.** Which files are guards, allow-lists or enrolment lists is
+repo knowledge no built-in catalog can know, so `.risk/rules.json` may name its
+own classes under `consequence_classes`: a class name, its path globs and a
+floor of Medium or High, such as
+`{"consequence_classes": {"release_guard": {"paths": ["scripts/plan-guard-allow*"], "floor": "Medium"}}}`.
+A changed or planned path matching a class's globs carries it (a rename is
+checked at its old path too); the class is read from the path alone, so its
+`types` is `[]`. A production root raises it to High like any class. It is
+recorded in the rules hash and listed in the report's consequences like the
+built-in classes. A built-in class name, a `Low` or unknown floor, and an empty
+or absolute glob are refused by name: a repo class can only raise the level.
+
 | Class | Floor | Read from |
 | --- | --- | --- |
 | `identity_rights` | Medium | `aws_iam_*`, `azuread_app_role_assignment`, `azuread_application*`, `azuread_directory_role*`, `azuread_service_principal*`, `azuredevops_*_permissions`, `azuredevops_branch_policy_*`, `azuredevops_check_*`, `azuredevops_environment*`, `azuredevops_group_membership`, `azuredevops_pipeline_authorization`, `azuredevops_resource_authorization`, `azuredevops_securityrole_assignment`, `azuredevops_serviceendpoint_*`, `azurerm_federated_identity_credential`, `azurerm_role_assignment`, `azurerm_role_definition`, `azurerm_user_assigned_identity`, `github_actions_*_oidc_subject_claim_customization_template`, `github_actions_*_permissions`, `github_actions_environment_*`, `github_branch_protection*`, `github_organization_ruleset`, `github_repository_collaborator*`, `github_repository_environment*`, `github_repository_ruleset`, `github_team_members`, `github_team_membership`, `github_team_repository`, `google_*_iam_*` (Terraform types, globs) |
@@ -316,7 +328,9 @@ a JSON plan file that predicts the change:
   "consequences": ["identity_rights"]}` or `{"path": "pipelines/release.yml",
   "added": 40, "consequences": ["pipeline_identity"]}`; see
   [Consequences](#consequences). An
-  unknown class, or one listed twice for a path, is refused by name.
+  unknown class, or one listed twice for a path, is refused by name. It names
+  built-in classes only: a repo class is found from the planned path, by the
+  globs in the target's rules, as for a real diff.
 - Which languages have tests (see [Which files count](#which-files-count))
   is read from the target's tree plus the planned paths; the plan file has no
   field for it.
@@ -424,7 +438,7 @@ line it leaves for reviewers, is in the skill file itself.
 - **`.risk/rules.json` in the assessed repo:** settings that can only *add*
   risk or context (extra generated paths for the report, extra sensitive
   areas, the exclusion toggles `exclude_non_code_files` and
-  `exclude_log_files`, and `production_roots`). It is read from the **target branch**, so a change cannot alter its
+  `exclude_log_files`, `production_roots` and `consequence_classes`). It is read from the **target branch**, so a change cannot alter its
   own rules. Anything that would lower a score is refused by name. A change
   that edits `.risk/` is scored like any other change: riskelle does not try
   to guard against a dishonest developer. riskelle's own
@@ -436,6 +450,11 @@ Production roots in `.risk/rules.json`, such as
 under them to High (see [Consequences](#consequences)). A root that is empty,
 absolute or does not end in `/**` is refused by name; roots with no consequence
 in them change nothing.
+
+Repo consequence classes in `.risk/rules.json`, such as
+`{"consequence_classes": {"release_guard": {"paths": ["scripts/plan-guard-allow*"], "floor": "Medium"}}}`,
+floor a change to a file the repo knows is consequential (see
+[Consequences](#consequences)).
 
 The exclusion toggles in `.risk/rules.json`:
 

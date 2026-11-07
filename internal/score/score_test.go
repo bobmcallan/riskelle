@@ -753,3 +753,64 @@ func TestShapeLevel(t *testing.T) {
 		t.Errorf("unfloored JSON: %s", js)
 	}
 }
+
+// TestRepoClassFloorsLevel pins repo consequence classes: a changed path
+// matching a class's globs carries it with its floor and no types, at the old
+// path of a rename too; a production root raises it to High; no match scores
+// exactly as with no classes; it sorts beside built-in classes.
+func TestRepoClassFloorsLevel(t *testing.T) {
+	guard := func(floor Level, roots ...string) Rules {
+		r := Default()
+		r.RepoClasses = []RepoClass{{Class: "release_guard", Paths: []string{"scripts/plan-guard-allow*"}, Floor: floor}}
+		r.ProductionRoots = roots
+		return r
+	}
+	with := func(files ...facts.File) facts.Facts {
+		f := levelFacts(0, 2, 0, 0)
+		f.Files = append(f.Files, files...)
+		return f
+	}
+	allow := facts.File{Path: "scripts/plan-guard-allow", Added: 4}
+	tests := []struct {
+		name  string
+		f     facts.Facts
+		r     Rules
+		level Level
+		want  []Consequence
+	}{
+		{"Medium class", with(allow), guard(Medium), Medium,
+			[]Consequence{{Consequence: facts.Consequence{Class: "release_guard", Paths: []string{"scripts/plan-guard-allow"}, Types: []string{}}, Floor: Medium}}},
+		{"High class", with(allow), guard(High), High,
+			[]Consequence{{Consequence: facts.Consequence{Class: "release_guard", Paths: []string{"scripts/plan-guard-allow"}, Types: []string{}}, Floor: High}}},
+		{"renamed from a class path", with(facts.File{Path: "scripts/other", OldPath: "scripts/plan-guard-allow-old"}), guard(Medium), Medium,
+			[]Consequence{{Consequence: facts.Consequence{Class: "release_guard", Paths: []string{"scripts/plan-guard-allow-old"}, Types: []string{}}, Floor: Medium}}},
+		{"under a production root", with(allow), guard(Medium, "scripts/**"), High,
+			[]Consequence{{Consequence: facts.Consequence{Class: "release_guard", Paths: []string{"scripts/plan-guard-allow"}, Types: []string{}},
+				Floor: High, ProductionRoots: []string{"scripts/**"}}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := Score(tt.f, tt.r)
+			plain := Score(tt.f, Default())
+			if got.Level != tt.level || !reflect.DeepEqual(got.Consequences, tt.want) {
+				t.Errorf("level %s consequences %+v, want %s %+v", got.Level, got.Consequences, tt.level, tt.want)
+			}
+			if got.Total != plain.Total || !reflect.DeepEqual(got.Breakdown, plain.Breakdown) {
+				t.Error("a repo class changed the total or breakdown")
+			}
+			if !reflect.DeepEqual(got.FlooredBy, []string{"release_guard"}) {
+				t.Errorf("floored_by = %v", got.FlooredBy)
+			}
+		})
+	}
+	f := with(facts.File{Path: "scripts/plan-guard"})
+	if got, plain := Score(f, guard(Medium)), Score(f, Default()); !reflect.DeepEqual(got, plain) {
+		t.Errorf("no match: %+v, want %+v", got, plain)
+	}
+	both := with(allow)
+	both.Consequences = identityRights
+	got := Score(both, guard(Medium))
+	if len(got.Consequences) != 2 || got.Consequences[0].Class != facts.ConsequenceIdentityRights || got.Consequences[1].Class != "release_guard" {
+		t.Errorf("consequences = %+v, want identity_rights then release_guard", got.Consequences)
+	}
+}
