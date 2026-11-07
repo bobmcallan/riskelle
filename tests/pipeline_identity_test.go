@@ -325,7 +325,7 @@ resources:
   repositories:
   - repository: templates
     type: git
-    name: id4me/id4me.pipelines
+    name: platform/pipelines
     ref: refs/tags/v1.4.0
 
 extends:
