@@ -316,3 +316,95 @@ func TestPipelineTemplatesFloorTheLevel(t *testing.T) {
 		}
 	})
 }
+
+// releaseRefYML models a release pipeline that extends a template from a
+// repository resource pinned by ref, passing it a service connection.
+const releaseRefYML = `trigger: none
+
+resources:
+  repositories:
+  - repository: templates
+    type: git
+    name: id4me/id4me.pipelines
+    ref: refs/tags/v1.4.0
+
+extends:
+  template: stages/terraform-release.yml@templates
+  parameters:
+    serviceConnection: graph-deploy
+    environment: prod
+    displayName: Release graph
+`
+
+// TestPipelineReferencesFloorTheLevel drives the built binary over a change
+// modelled on a real one: moving the template repository's ref in a pipeline
+// that runs as an identity is Low by shape and reported Medium, or High under
+// a production root, and so is changing its extends template; the same move in
+// a pipeline that runs as no identity, or a displayName change, carries none.
+func TestPipelineReferencesFloorTheLevel(t *testing.T) {
+	bin := buildRiskelle(t, t.TempDir())
+	run := func(t *testing.T, dir string, args ...string) string {
+		t.Helper()
+		code, out, stderr := runScore(t, bin, dir, append([]string{"--base", "main", "--head", "topic"}, args...)...)
+		if code != 0 {
+			t.Fatalf("score exit %d: %s", code, stderr)
+		}
+		return out
+	}
+	base := map[string]string{"pipelines/release.yml": releaseRefYML}
+	moved := strings.Replace(releaseRefYML, "refs/tags/v1.4.0", "refs/heads/main", 1)
+
+	t.Run("31885b0", func(t *testing.T) {
+		dir := rulesFixture(t, base, map[string]string{"pipelines/release.yml": moved})
+		got := decodeReport(t, run(t, dir))
+		n := 0
+		for _, p := range got.Breakdown {
+			n += p.Points
+		}
+		if got.Total != n || got.ShapeLevel != score.Low || got.Level != score.Medium ||
+			!reflect.DeepEqual(got.FlooredBy, []string{"pipeline_identity"}) {
+			t.Errorf("total %d (sum %d) shape %s level %s floored_by %v, want Low floored Medium by pipeline_identity",
+				got.Total, n, got.ShapeLevel, got.Level, got.FlooredBy)
+		}
+		want := `[{"class":"pipeline_identity","paths":["pipelines/release.yml"],"types":["resources.repositories.ref"],"floor":"Medium"}]`
+		if b, _ := json.Marshal(got.Consequences); string(b) != want {
+			t.Errorf("consequences = %s\nwant %s", b, want)
+		}
+		if md := run(t, dir, "--format", "markdown"); !strings.Contains(md,
+			"- pipeline_identity, floor Medium: paths `pipelines/release.yml`; types `resources.repositories.ref`") {
+			t.Errorf("markdown lacks the consequence:\n%s", md)
+		}
+	})
+
+	t.Run("extends template", func(t *testing.T) {
+		alt := strings.Replace(releaseRefYML, "terraform-release.yml@templates", "terraform-release-v2.yml@templates", 1)
+		got := decodeReport(t, run(t, rulesFixture(t, base, map[string]string{"pipelines/release.yml": alt})))
+		want := `[{"class":"pipeline_identity","paths":["pipelines/release.yml"],"types":["extends.template"],"floor":"Medium"}]`
+		if b, _ := json.Marshal(got.Consequences); got.Level != score.Medium || string(b) != want {
+			t.Errorf("level %s consequences = %s\nwant Medium %s", got.Level, b, want)
+		}
+	})
+
+	t.Run("under a production root", func(t *testing.T) {
+		b := map[string]string{"pipelines/release.yml": releaseRefYML, ".risk/rules.json": `{"production_roots":["pipelines/**"]}`}
+		got := decodeReport(t, run(t, rulesFixture(t, b, map[string]string{"pipelines/release.yml": moved})))
+		want := `[{"class":"pipeline_identity","paths":["pipelines/release.yml"],"types":["resources.repositories.ref"],` +
+			`"floor":"High","production_roots":["pipelines/**"]}]`
+		if b, _ := json.Marshal(got.Consequences); got.Level != score.High || string(b) != want {
+			t.Errorf("level %s consequences = %s\nwant High %s", got.Level, b, want)
+		}
+	})
+
+	for _, tt := range []struct{ name, base, topic string }{
+		{"no identity", strings.Replace(releaseRefYML, "serviceConnection: graph-deploy", "target: graph", 1),
+			strings.Replace(strings.Replace(releaseRefYML, "serviceConnection: graph-deploy", "target: graph", 1), "refs/tags/v1.4.0", "refs/heads/main", 1)},
+		{"unmarked lines", releaseRefYML, strings.Replace(releaseRefYML, "Release graph", "Release Graph API", 1)},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			out := run(t, rulesFixture(t, map[string]string{"pipelines/release.yml": tt.base}, map[string]string{"pipelines/release.yml": tt.topic}))
+			if got := decodeReport(t, out); got.Level != score.Low || !strings.Contains(out, `"consequences": []`) || !strings.Contains(out, `"floored_by": []`) {
+				t.Errorf("level %s consequences %+v, want Low and none", got.Level, got.Consequences)
+			}
+		})
+	}
+}

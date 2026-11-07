@@ -65,6 +65,10 @@ type yamlFrame struct {
 // jobs.<job_id>.environment in a GitHub workflow. Every line nested under a
 // marked key carries its mark. Comment and blank lines carry none, and a
 // block scalar's content is never read as keys.
+//
+// A reference to the code a pipeline runs (reference) carries its key path as
+// its mark only when some line of content carries a mark: a definition that
+// runs as no identity is unchanged by where its code comes from.
 func pipelineIdentity(content []byte) []string {
 	lines := strings.Split(string(content), "\n")
 	signed := false
@@ -79,6 +83,7 @@ func pipelineIdentity(content []byte) []string {
 		return nil
 	}
 	out := make([]string, len(lines))
+	refs := make([]string, len(lines))
 	var stack []yamlFrame
 	scalar := -1 // the column of the key whose block scalar is open, or -1
 	top := func() string {
@@ -151,13 +156,46 @@ func pipelineIdentity(content []byte) []string {
 		if mark == "" {
 			mark = top()
 		}
+		refs[i] = reference(lower, item, stack)
 		stack = append(stack, yamlFrame{col, lower, item, mark})
 		out[i] = mark
 		if blockScalar.MatchString(value) {
 			scalar = col
 		}
 	}
+	for _, m := range out {
+		if m != "" {
+			for i, r := range refs {
+				if r != "" && out[i] == "" {
+					out[i] = r
+				}
+			}
+			break
+		}
+	}
 	return out
+}
+
+// reference returns the key path of a key line that references the code a
+// pipeline runs, or "": a repository resource's ref
+// (resources.repositories.ref), extends: template: (extends.template), or a
+// template: that is a direct key of a list item under stages:, jobs: or
+// steps: (stages.template, jobs.template, steps.template). stack is the
+// frames above the line, after popping its siblings.
+func reference(key, item string, stack []yamlFrame) string {
+	switch {
+	case key == "ref" && item != "" && len(stack) == 2 && stack[0].key == "resources" && stack[0].col == 0 &&
+		stack[1].key == "repositories":
+		return "resources.repositories.ref"
+	case key == "template" && len(stack) == 1 && stack[0].key == "extends" && stack[0].col == 0:
+		return "extends.template"
+	case key == "template" && item != "" && len(stack) > 0:
+		switch parent := stack[len(stack)-1].key; parent {
+		case "stages", "jobs", "steps":
+			return parent + ".template"
+		}
+	}
+	return ""
 }
 
 // unquote strips one pair of matching quotes.

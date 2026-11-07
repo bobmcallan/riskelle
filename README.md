@@ -112,7 +112,7 @@ or absolute glob are refused by name: a repo class can only raise the level.
 | Class | Floor | Read from |
 | --- | --- | --- |
 | `identity_rights` | Medium | `aws_iam_*`, `azuread_administrative_unit_member`, `azuread_app_role_assignment`, `azuread_application*`, `azuread_directory_role*`, `azuread_group_member`, `azuread_group_role_management_policy`, `azuread_service_principal*`, `azuredevops_*_permissions`, `azuredevops_branch_policy_*`, `azuredevops_check_*`, `azuredevops_environment*`, `azuredevops_group_membership`, `azuredevops_pipeline_authorization`, `azuredevops_resource_authorization`, `azuredevops_securityrole_assignment`, `azuredevops_serviceendpoint_*`, `azurerm_federated_identity_credential`, `azurerm_role_assignment`, `azurerm_role_definition`, `azurerm_user_assigned_identity`, `github_actions_*_oidc_subject_claim_customization_template`, `github_actions_*_permissions`, `github_actions_environment_*`, `github_branch_protection*`, `github_organization_ruleset`, `github_repository_collaborator*`, `github_repository_environment*`, `github_repository_ruleset`, `github_team_members`, `github_team_membership`, `github_team_repository`, `google_*_iam_*` (Terraform types, globs); `azuread_group` only in its `members` or `owners` attribute, reported as `azuread_group.members` or `azuread_group.owners` |
-| `pipeline_identity` | Medium | Pipeline definitions: keys `*serviceConnection`, `azureSubscription*`, `connectedServiceName*`, `environment` (on a job), `id-token: write`, `permissions: write-all` |
+| `pipeline_identity` | Medium | Pipeline definitions: keys `*serviceConnection`, `azureSubscription*`, `connectedServiceName*`, `environment` (on a job), `id-token: write`, `permissions: write-all`; in a definition that carries any of these, the references `resources.repositories.ref`, `extends.template`, `stages.template`, `jobs.template`, `steps.template` |
 
 - Delivery rights count as identity and rights: Azure DevOps and GitHub service
   connections and their authorisations, deployment environments and their
@@ -162,6 +162,14 @@ catalogued key, so it carries nothing.
 - `environment` counts only on a job: a direct key of an Azure `- deployment:`
   item, or `jobs.<job_id>.environment` in a GitHub workflow; never under
   `variables:`, `env:` or `with:`.
+- A changed reference to the code a pipeline runs carries the class only when
+  that side's content (head for added lines, the merge base for removed ones)
+  carries a catalogued key on some line: a repository resource's `ref`
+  (`resources.repositories[].ref`), `extends: template:` (an `@repo` suffix
+  included), and a `template:` that is a direct key of a list item under
+  `stages:`, `jobs:` or `steps:`, each typed by its key path. A definition with
+  no catalogued key carries nothing for them. A repository's `name`, a
+  `variables:` template and GitHub `uses:` are not read.
 - Comments and block-scalar content (a `script: |` body) are never read as
   keys. Added lines are read at head and removed ones at the merge base.
 - It is an indentation walk, not a YAML parser: flow style

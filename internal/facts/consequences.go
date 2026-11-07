@@ -84,6 +84,8 @@ var builtinConsequences = []struct {
 	{class: ConsequencePipelineIdentity, keys: []string{
 		"*serviceConnection", "azureSubscription*", "connectedServiceName*",
 		"environment", "id-token: write", "permissions: write-all",
+		// references, only in a definition that carries one of the above
+		"resources.repositories.ref", "extends.template", "stages.template", "jobs.template", "steps.template",
 	}},
 }
 

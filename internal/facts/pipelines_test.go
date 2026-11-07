@@ -59,6 +59,28 @@ func TestPipelineIdentity(t *testing.T) {
 			"        env:\n        - name: ENVIRONMENT\n          value: {{ .Values.environment }}\n{{- end }}\n", nil},
 		{"helm storage class", "apiVersion: storage.k8s.io/v1\nkind: StorageClass\nmetadata:\n  labels:\n    environment: prod\n" +
 			"parameters:\n  type: gp3\n", nil},
+		// references, in a marked definition
+		{"repository ref in a marked pipeline", "resources:\n  repositories:\n  - repository: templates\n    type: git\n" +
+			"    name: org/pipelines\n    ref: refs/heads/main\nextends:\n  template: stages/release.yml@templates\n" +
+			"  parameters:\n    serviceConnection: graph-deploy\n",
+			[]string{"06:resources.repositories.ref", "08:extends.template", "10:serviceConnection"}},
+		{"ref is the item's first key", "resources:\n  repositories:\n  - ref: x\n    repository: t\n" +
+			"steps:\n- task: AzureCLI@2\n  inputs:\n    azureSubscription: sc\n",
+			[]string{"03:resources.repositories.ref", "08:azureSubscription"}},
+		{"stage, job and step templates", "stages:\n- template: s.yml@templates\n- stage: B\n  jobs:\n  - template: j.yml\n" +
+			"  - deployment: D\n    environment: prod\n    strategy:\n      runOnce:\n        deploy:\n          steps:\n" +
+			"          - template: t.yml\n  - job: E\n    steps:\n    - template: u.yml\n",
+			[]string{"02:stages.template", "05:jobs.template", "07:environment", "12:steps.template", "15:steps.template"}},
+		{"references in an unmarked pipeline", "resources:\n  repositories:\n  - repository: templates\n    ref: refs/heads/main\n" +
+			"extends:\n  template: stages/release.yml@templates\n  parameters:\n    target: x\n", nil},
+		{"references elsewhere", "variables:\n  ref: x\nsteps:\n- task: X@1\n  inputs:\n    template: y\n    azureSubscription: sc\n" +
+			"extends:\n  parameters:\n    template: z\n",
+			[]string{"07:azureSubscription"}},
+		{"variables template", "variables:\n- template: vars.yml\nsteps:\n- task: X@1\n  inputs:\n    azureSubscription: sc\n",
+			[]string{"06:azureSubscription"}},
+		{"displayName and script in a marked pipeline", "steps:\n- template: t.yml\n- script: |\n    template: no\n" +
+			"  displayName: Build\n- task: X@1\n  inputs:\n    azureSubscription: sc\n",
+			[]string{"02:steps.template", "08:azureSubscription"}},
 		// AC2: no marks
 		{"docker-compose", "services:\n  app:\n    environment:\n      - FOO=bar\n", nil},
 		{"variables environment", "variables:\n  environment: dev\n", nil},
