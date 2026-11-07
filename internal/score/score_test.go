@@ -727,3 +727,50 @@ func TestProductionRootsWithoutConsequence(t *testing.T) {
 		}
 	}
 }
+
+// TestShapeLevel pins shape_level and floored_by: the shape level is always
+// the total's own level, and floored_by names the classes only when a floor
+// raised the level above it.
+func TestShapeLevel(t *testing.T) {
+	under := func(f facts.Facts) facts.Facts {
+		f.Consequences = []facts.Consequence{{Class: facts.ConsequenceIdentityRights, Paths: []string{"prod-tenant/iam.tf"}}}
+		return f
+	}
+	noFloor := Default()
+	noFloor.ConsequenceFloors = nil
+	ir := func(f facts.Facts) facts.Facts { f.Consequences = identityRights; return f }
+	tests := []struct {
+		name      string
+		f         facts.Facts
+		r         Rules
+		shape     Level
+		level     Level
+		flooredBy []string
+	}{
+		{"Low, no consequence", levelFacts(0, 2, 0, 0), Default(), Low, Low, nil},
+		{"Low floored to Medium", ir(levelFacts(0, 2, 0, 0)), Default(), Low, Medium, []string{facts.ConsequenceIdentityRights}},
+		{"Medium at its floor", ir(levelFacts(401, 2, 0, 0)), Default(), Medium, Medium, nil},
+		{"High above its floor", ir(levelFacts(801, 6, 3, 3)), Default(), High, High, nil},
+		{"Low floored High by a production root", under(levelFacts(0, 2, 0, 0)), rootRules(), Low, High, []string{facts.ConsequenceIdentityRights}},
+		{"class with no floor", ir(levelFacts(0, 2, 0, 0)), noFloor, Low, Low, nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := Score(tt.f, tt.r)
+			if got.ShapeLevel != tt.shape || got.Level != tt.level || !reflect.DeepEqual(got.FlooredBy, tt.flooredBy) {
+				t.Errorf("shape %s, level %s, floored_by %v; want %s, %s, %v",
+					got.ShapeLevel, got.Level, got.FlooredBy, tt.shape, tt.level, tt.flooredBy)
+			}
+			if want := level(got.Total, tt.r.Levels); got.ShapeLevel != want {
+				t.Errorf("shape level %s, want the total's level %s", got.ShapeLevel, want)
+			}
+		})
+	}
+	js, err := json.Marshal(Score(levelFacts(0, 2, 0, 0), Default()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(js), `"shape_level":"Low"`) || strings.Contains(string(js), "floored_by") {
+		t.Errorf("unfloored JSON: %s", js)
+	}
+}

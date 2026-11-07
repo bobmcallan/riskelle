@@ -45,6 +45,7 @@ var provenance = score.Provenance{
 func estimateFixture() Report {
 	r := New(KindEstimate, score.Result{
 		Total: 7, Level: score.Medium, // floored by identity_rights
+		ShapeLevel: score.Low, FlooredBy: []string{"identity_rights"},
 		Breakdown: []score.Point{
 			{Measure: score.MeasureSize, Fact: "lines", Value: 101, Min: 51, Points: 5,
 				From: []string{"core/calc.go", "ui/a&b<c>.js"}, Excluded: []string{"docs/guide.md"}},
@@ -68,7 +69,7 @@ func estimateFixture() Report {
 
 func noAreasFixture() Report {
 	r := New(KindScore, score.Result{
-		Total: 0, Level: score.Low,
+		Total: 0, Level: score.Low, ShapeLevel: score.Low, FlooredBy: []string{},
 		Breakdown: []score.Point{
 			{Measure: score.MeasureTests, Fact: "untested_production_files", From: []string{}},
 		},
@@ -135,7 +136,8 @@ func TestReportCarriesResult(t *testing.T) {
 	}
 	none := render(t, "json", noAreasFixture())
 	for _, s := range []string{`"kind": "score"`, `"base": "` + strings.Repeat("1", 40) + `"`,
-		`"head": "` + strings.Repeat("2", 40) + `"`, `"areas": []`, `"consequences": []`, `"note": "` + Note} {
+		`"head": "` + strings.Repeat("2", 40) + `"`, `"areas": []`, `"consequences": []`, `"note": "` + Note,
+		`"shape_level": "Low"`, `"floored_by": []`} {
 		if !bytes.Contains(none, []byte(s)) {
 			t.Errorf("no-areas JSON lacks %s:\n%s", s, none)
 		}
@@ -199,7 +201,8 @@ func TestReadmeDocumentsReportConsequences(t *testing.T) {
 	if j := strings.Index(s, "\n#"); j >= 0 {
 		s = s[:j]
 	}
-	for _, want := range []string{"`\"consequences\"`", FloorHeading} {
+	for _, want := range []string{"`\"consequences\"`", FloorHeading,
+		"`\"shape_level\"`", "`\"floored_by\"`", "splitting the change will not lower it"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("README Report section lacks %s", want)
 		}
@@ -221,5 +224,38 @@ func TestReportNamesProductionRoot(t *testing.T) {
 	}
 	if js := string(render(t, "json", estimateFixture())); strings.Contains(js, "production_roots") {
 		t.Errorf("json names roots with none:\n%s", js)
+	}
+}
+
+// TestMarkdownStatesFloor pins the floor statement: when a floor set the
+// level, the Markdown states the shape level, the classes and that splitting
+// will not lower it, before the breakdown table; otherwise it says nothing.
+func TestMarkdownStatesFloor(t *testing.T) {
+	want := "Shape level Low; the level is Medium, set by the consequence floor of identity_rights. " + SplitNote + "\n"
+	md := string(render(t, "markdown", estimateFixture()))
+	i := strings.Index(md, want)
+	if i < 0 {
+		t.Fatalf("markdown lacks the floor statement %q:\n%s", want, md)
+	}
+	if j := strings.Index(md, "| Measure |"); j < i {
+		t.Errorf("floor statement comes after the table:\n%s", md)
+	}
+	two := estimateFixture()
+	two.FlooredBy = []string{"a", "b"}
+	if md := string(render(t, "markdown", two)); !strings.Contains(md, "set by the consequence floor of a, b. ") {
+		t.Errorf("markdown does not list both classes:\n%s", md)
+	}
+	for name, r := range map[string]Report{"no areas": noAreasFixture(), "medium at its floor": func() Report {
+		r := estimateFixture()
+		r.ShapeLevel, r.FlooredBy = score.Medium, []string{}
+		return r
+	}()} {
+		md := string(render(t, "markdown", r))
+		if strings.Contains(md, "Shape level") || strings.Contains(md, SplitNote) {
+			t.Errorf("%s: floor statement with no floor raise:\n%s", name, md)
+		}
+		if name == "medium at its floor" && !strings.Contains(md, FloorHeading) {
+			t.Errorf("%s: consequences section missing:\n%s", name, md)
+		}
 	}
 }

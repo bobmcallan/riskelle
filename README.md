@@ -82,6 +82,8 @@ Each class sets a **floor**: the reported level is the higher of the total's
 own level and every consequence's floor. A floor never changes the total or any
 breakdown entry, so the shape score still rewards small changes, and splitting a
 change cannot lower a floor: the class lands in whichever change carries it.
+The report gives the total's own level as `"shape_level"` beside the level (see
+Report).
 The floors are built in (`consequence_floors`), recorded in the rules hash on
 every report, and refused by name if `.risk/rules.json` sets them: a repo can
 only raise a floor, through production roots.
@@ -284,7 +286,14 @@ change carries sit under `"consequences"` (class, paths, types and floor; `[]`
 when none) and, in Markdown, under "Consequences (floor the level)", shown only
 when there is one. A consequence floored by a production root carries
 `"production_roots"`, and its Markdown line reads `floor High (production root
-…)`. The same result always prints the same bytes.
+…)`. Every report also carries `"shape_level"`, the level of the total
+alone, beside `"level"`. When a consequence floor raises the level above it,
+`"floored_by"` names the classes whose floor set it (`[]` otherwise), and the
+Markdown opens with a line stating the shape level, the floor that set the
+level and that splitting the change will not lower it. A flow can route a
+floored change on a non-empty `"floored_by"` (for example, hold it for an
+owner's approval) rather than return it to be split. The same result always
+prints the same bytes.
 
 ## With satelle
 

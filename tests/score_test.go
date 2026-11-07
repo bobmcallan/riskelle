@@ -68,7 +68,7 @@ func TestScoreCollectedFacts(t *testing.T) {
 	// nothing depends on the changed packages or ui/app.js -> 0; the doc and
 	// lock file are left out, and api/svc.pb.go counts as its package.
 	// Total 24: Medium.
-	want := `{"total":24,"level":"Medium","breakdown":[` +
+	want := `{"total":24,"level":"Medium","shape_level":"Medium","breakdown":[` +
 		`{"measure":"size","fact":"lines","value":180,"min":51,"points":5,` +
 		`"from":["core/calc.go","ui/app.js"],` +
 		`"excluded":["api/svc.pb.go","core/calc_test.go","docs/guide.md","go.sum"]},` +

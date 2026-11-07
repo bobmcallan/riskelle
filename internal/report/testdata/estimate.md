@@ -2,6 +2,8 @@
 
 Estimate from plan `plan.json`, not a measured diff.
 
+Shape level Low; the level is Medium, set by the consequence floor of identity_rights. Splitting the change will not lower it: a consequence lands in whichever change carries it.
+
 | Measure | Fact | Value | Band from | Points |
 | --- | --- | ---: | ---: | ---: |
 | size | lines | 101 | 51 | 5 |

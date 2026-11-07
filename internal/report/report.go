@@ -32,14 +32,22 @@ const FloorHeading = "Consequences (floor the level)"
 // FloorNote explains consequences, in every format that lists them.
 const FloorNote = "Each consequence raises the level to at least its floor; it never changes the total or the breakdown."
 
+// SplitNote follows the floor statement: a level a consequence floor set
+// cannot be lowered by splitting the change.
+const SplitNote = "Splitting the change will not lower it: a consequence lands in whichever change carries it."
+
 // Report is what riskelle prints for one scored change.
 type Report struct {
-	Kind      string        `json:"kind"`           // KindScore or KindEstimate
-	Plan      string        `json:"plan,omitempty"` // estimate only: the plan file as given
-	Base      string        `json:"base,omitempty"` // score only: full SHA the base ref resolved to
-	Head      string        `json:"head,omitempty"` // score only: full SHA the head ref resolved to
-	Total     int           `json:"total"`
-	Level     score.Level   `json:"level"`
+	Kind  string      `json:"kind"`           // KindScore or KindEstimate
+	Plan  string      `json:"plan,omitempty"` // estimate only: the plan file as given
+	Base  string      `json:"base,omitempty"` // score only: full SHA the base ref resolved to
+	Head  string      `json:"head,omitempty"` // score only: full SHA the head ref resolved to
+	Total int         `json:"total"`
+	Level score.Level `json:"level"`
+	// The level of the total alone; a consequence floor may raise Level above it.
+	ShapeLevel score.Level `json:"shape_level"`
+	// The consequence classes whose floor set Level above ShapeLevel, sorted; [] when none.
+	FlooredBy []string      `json:"floored_by"`
 	Breakdown []score.Point `json:"breakdown"`
 	// Consequence classes and their floors, sorted by class; [] when none.
 	Consequences []score.Consequence `json:"consequences"`
@@ -67,8 +75,13 @@ func New(kind string, res score.Result) Report {
 	if consequences == nil {
 		consequences = []score.Consequence{}
 	}
+	flooredBy := res.FlooredBy
+	if flooredBy == nil {
+		flooredBy = []string{}
+	}
 	return Report{
-		Kind: kind, Total: res.Total, Level: res.Level, Breakdown: breakdown, Consequences: consequences,
+		Kind: kind, Total: res.Total, Level: res.Level, ShapeLevel: res.ShapeLevel, FlooredBy: flooredBy,
+		Breakdown: breakdown, Consequences: consequences,
 		Context: Context{Note: Note, Areas: areas}, Provenance: res.Provenance,
 	}
 }
@@ -103,6 +116,10 @@ func (r Report) Markdown(w io.Writer) error {
 	}
 	if r.Base != "" {
 		fmt.Fprintf(&b, "Diff of head %s against base %s, from their merge base.\n\n", code(r.Head), code(r.Base))
+	}
+	if len(r.FlooredBy) > 0 {
+		fmt.Fprintf(&b, "Shape level %s; the level is %s, set by the consequence floor of %s. %s\n\n",
+			r.ShapeLevel, r.Level, strings.Join(r.FlooredBy, ", "), SplitNote)
 	}
 
 	b.WriteString("| Measure | Fact | Value | Band from | Points |\n| --- | --- | ---: | ---: | ---: |\n")

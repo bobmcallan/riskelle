@@ -49,6 +49,8 @@ type Point struct {
 type Result struct {
 	Total        int           `json:"total"` // 0-100
 	Level        Level         `json:"level"`
+	ShapeLevel   Level         `json:"shape_level"`            // the level of the total alone, before any consequence floor
+	FlooredBy    []string      `json:"floored_by,omitempty"`   // when a floor raised Level above ShapeLevel, the classes whose floor set it, sorted; nil otherwise
 	Breakdown    []Point       `json:"breakdown"`              // size/lines; spread/files, directories, projects; degree/existing_lines; branch_age/days, trunk_commits; tests/untested_production_files; impact/dependents
 	Consequences []Consequence `json:"consequences,omitempty"` // consequence classes with their floors, sorted by class; nil when none
 	Areas        []Area        `json:"areas,omitempty"`        // sensitive areas the change lands in, sorted by name; reviewer context only, never scored; nil when none
@@ -110,8 +112,18 @@ func Score(f facts.Facts, r Rules) Result {
 	}
 	total = max(0, min(total, 100))
 	cs := consequences(f, r)
+	shape := level(total, r.Levels)
+	lvl := floored(shape, cs, r.Levels)
+	var by []string
+	if lvl != shape {
+		for _, c := range cs {
+			if c.Floor == lvl {
+				by = append(by, c.Class)
+			}
+		}
+	}
 	return Result{
-		Total: total, Level: floored(level(total, r.Levels), cs, r.Levels),
+		Total: total, Level: lvl, ShapeLevel: shape, FlooredBy: by,
 		Breakdown: breakdown, Consequences: cs, Areas: areas(f.Files, r),
 	}
 }

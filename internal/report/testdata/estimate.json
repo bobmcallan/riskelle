@@ -3,6 +3,10 @@
   "plan": "plan.json",
   "total": 7,
   "level": "Medium",
+  "shape_level": "Low",
+  "floored_by": [
+    "identity_rights"
+  ],
   "breakdown": [
     {
       "measure": "size",
