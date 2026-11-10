@@ -54,8 +54,9 @@ repo_name            = "pipelines"
 // TestVariableReferenceFloorsTheLevel drives the built binary over a change
 // modelled on a real one: moving a variable that a required-template check
 // uses, in its tfvars and its declaration, is Low by shape and reported
-// Medium, or High under a production root, as is removing the assignment; a
-// variable used only by an uncatalogued block, one set in another directory,
+// High, as access_widened (a changed value counts as altered), and under a
+// production root every consequence names the root; removing the assignment
+// is Medium, identity_rights alone; a variable used only by an uncatalogued block, one set in another directory,
 // a description-only change and an unused name carry nothing.
 func TestVariableReferenceFloorsTheLevel(t *testing.T) {
 	bin := buildRiskelle(t, t.TempDir())
@@ -91,12 +92,13 @@ func TestVariableReferenceFloorsTheLevel(t *testing.T) {
 		for _, p := range got.Breakdown {
 			n += p.Points
 		}
-		if got.Total >= 20 || got.Total != n || got.ShapeLevel != score.Low || got.Level != score.Medium ||
-			len(got.FlooredBy) != 1 || got.FlooredBy[0] != "identity_rights" {
-			t.Errorf("total %d (sum %d) shape %s level %s floored_by %v, want Low floored Medium by identity_rights",
+		if got.Total >= 20 || got.Total != n || got.ShapeLevel != score.Low || got.Level != score.High ||
+			len(got.FlooredBy) != 1 || got.FlooredBy[0] != "access_widened" {
+			t.Errorf("total %d (sum %d) shape %s level %s floored_by %v, want Low floored High by access_widened",
 				got.Total, n, got.ShapeLevel, got.Level, got.FlooredBy)
 		}
-		want := `[{"class":"identity_rights","paths":["delivery/terraform.tfvars","delivery/variables.tf"],"types":[` + via + `],"floor":"Medium"}]`
+		paths := `"paths":["delivery/terraform.tfvars","delivery/variables.tf"],"types":[` + via + `]`
+		want := `[{"class":"access_widened",` + paths + `,"floor":"High"},{"class":"identity_rights",` + paths + `,"floor":"Medium"}]`
 		if b, _ := json.Marshal(got.Consequences); string(b) != want {
 			t.Errorf("consequences = %s\nwant %s", b, want)
 		}
@@ -114,8 +116,13 @@ func TestVariableReferenceFloorsTheLevel(t *testing.T) {
 	t.Run("under a production root", func(t *testing.T) {
 		got, _ := run(t, rulesFixture(t, base(map[string]string{".risk/rules.json": `{"production_roots":["delivery/**"]}`}),
 			map[string]string{"delivery/terraform.tfvars": moved}))
-		if got.Level != score.High || len(got.Consequences) != 1 || len(got.Consequences[0].ProductionRoots) != 1 {
-			t.Errorf("level %s consequences %+v, want High naming delivery/**", got.Level, got.Consequences)
+		if got.Level != score.High || len(got.Consequences) != 2 {
+			t.Errorf("level %s consequences %+v, want High with two", got.Level, got.Consequences)
+		}
+		for _, c := range got.Consequences {
+			if c.Floor != score.High || len(c.ProductionRoots) != 1 || c.ProductionRoots[0] != "delivery/**" {
+				t.Errorf("consequence %+v, want High naming delivery/**", c)
+			}
 		}
 	})
 

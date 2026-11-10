@@ -33,11 +33,12 @@ func decodeReport(t *testing.T, out string) report.Report {
 	return r
 }
 
-// TestConsequenceFloorsTheLevel drives the built binary: a change to an
-// identity grant's block is reported Medium though its total is Low, the
-// total is the sum of its points, and the Markdown names the consequence;
-// estimate with a plan naming the class agrees; a change to an uncatalogued
-// block scores at its own level with no consequence.
+// TestConsequenceFloorsTheLevel drives the built binary: an identity grant
+// altered is reported High, floored by access_widened, though its total is
+// Low; the total is the sum of its points, and the Markdown names both
+// consequences; estimate with a plan naming identity_rights alone is Medium;
+// a change to an uncatalogued block scores at its own level with no
+// consequence.
 func TestConsequenceFloorsTheLevel(t *testing.T) {
 	bin := buildRiskelle(t, t.TempDir())
 	run := func(t *testing.T, dir string, args ...string) string {
@@ -60,21 +61,23 @@ func TestConsequenceFloorsTheLevel(t *testing.T) {
 	t.Run("identity grant", func(t *testing.T) {
 		dir := rulesFixture(t, base, map[string]string{"iam/main.tf": tfStorage + "\n" + strings.Replace(tfRole, "Reader", "Owner", 1)})
 		got := decodeReport(t, run(t, dir))
-		if got.Level != score.Medium || got.Total >= 20 || got.Total != sum(got) {
-			t.Errorf("level %s total %d (points sum %d), want Medium with a Low total equal to the sum", got.Level, got.Total, sum(got))
+		if got.Level != score.High || got.Total >= 20 || got.Total != sum(got) {
+			t.Errorf("level %s total %d (points sum %d), want High with a Low total equal to the sum", got.Level, got.Total, sum(got))
 		}
-		if got.ShapeLevel != score.Low || !reflect.DeepEqual(got.FlooredBy, []string{"identity_rights"}) {
-			t.Errorf("shape_level %s floored_by %v, want Low [identity_rights]", got.ShapeLevel, got.FlooredBy)
+		if got.ShapeLevel != score.Low || !reflect.DeepEqual(got.FlooredBy, []string{"access_widened"}) {
+			t.Errorf("shape_level %s floored_by %v, want Low [access_widened]", got.ShapeLevel, got.FlooredBy)
 		}
-		want := `[{"class":"identity_rights","paths":["iam/main.tf"],"types":["azurerm_role_assignment"],"floor":"Medium"}]`
+		want := `[{"class":"access_widened","paths":["iam/main.tf"],"types":["azurerm_role_assignment"],"floor":"High"},` +
+			`{"class":"identity_rights","paths":["iam/main.tf"],"types":["azurerm_role_assignment"],"floor":"Medium"}]`
 		if b, _ := json.Marshal(got.Consequences); string(b) != want {
 			t.Errorf("consequences = %s, want %s", b, want)
 		}
 
 		md := run(t, dir, "--format", "markdown")
 		for _, w := range []string{"### " + report.FloorHeading, report.FloorNote,
+			"- access_widened, floor High: paths `iam/main.tf`; types `azurerm_role_assignment`",
 			"- identity_rights, floor Medium: paths `iam/main.tf`; types `azurerm_role_assignment`",
-			"Shape level Low; the level is Medium, set by the consequence floor of identity_rights.", report.SplitNote} {
+			"Shape level Low; the level is High, set by the consequence floor of access_widened.", report.SplitNote} {
 			if !strings.Contains(md, w) {
 				t.Errorf("markdown lacks %q:\n%s", w, md)
 			}

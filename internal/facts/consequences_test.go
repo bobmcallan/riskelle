@@ -189,8 +189,26 @@ func TestIdentityRightsCatalog(t *testing.T) {
 			t.Errorf("attributeConsequencesOf(%q, %q) = %v, want %v", tt.typ, tt.attr, got, tt.want)
 		}
 	}
-	if !IsConsequence(ConsequenceIdentityRights) || !IsConsequence(ConsequencePipelineIdentity) || IsConsequence("root_access") {
+	if !IsConsequence(ConsequenceIdentityRights) || !IsConsequence(ConsequencePipelineIdentity) || !IsConsequence(ConsequenceAccessWidened) || IsConsequence("root_access") {
 		t.Error("IsConsequence does not match the catalog")
+	}
+}
+
+// TestWidenedBy pins which classes accompany a class on a line added at
+// head: access_widened accompanies identity_rights, nothing else is widened.
+func TestWidenedBy(t *testing.T) {
+	for _, tt := range []struct {
+		class string
+		want  []string
+	}{
+		{ConsequenceIdentityRights, []string{ConsequenceAccessWidened}},
+		{ConsequencePipelineIdentity, nil},
+		{ConsequenceAccessWidened, nil},
+		{"", nil},
+	} {
+		if got := widenedBy(tt.class); !reflect.DeepEqual(got, tt.want) {
+			t.Errorf("widenedBy(%q) = %v, want %v", tt.class, got, tt.want)
+		}
 	}
 }
 
@@ -240,6 +258,9 @@ func TestReadmeListsConsequences(t *testing.T) {
 	}
 	if !strings.Contains(cons, "via var.") {
 		t.Error("README Consequences does not describe the via var. type")
+	}
+	if !strings.Contains(cons, "| `access_widened` | High |") || !strings.Contains(cons, "added at head") {
+		t.Error("README Consequences does not give access_widened its High row and rule")
 	}
 	for _, s := range []string{"resource", "data", ".tf"} {
 		if !strings.Contains(cons, "`"+s+"`") {

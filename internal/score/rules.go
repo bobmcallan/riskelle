@@ -125,6 +125,7 @@ func Default() Rules {
 		ShapeCap: Medium,
 
 		// A consequence raises the level to at least its floor, never the total.
-		ConsequenceFloors: []Floor{{facts.ConsequenceIdentityRights, Medium}, {facts.ConsequencePipelineIdentity, Medium}},
+		// access_widened is the built-in High floor: a grant added or altered.
+		ConsequenceFloors: []Floor{{facts.ConsequenceAccessWidened, High}, {facts.ConsequenceIdentityRights, Medium}, {facts.ConsequencePipelineIdentity, Medium}},
 	}
 }
