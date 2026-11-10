@@ -17,12 +17,14 @@ const (
 	ConsequenceAccessWidened    = "access_widened"
 	ConsequenceIdentityRights   = "identity_rights"
 	ConsequencePipelineIdentity = "pipeline_identity"
+	ConsequenceSecretAdded      = "secret_added"
 )
 
 // Consequence is one class a change carries, the changed or planned paths
 // that triggered it and the Terraform block types (with ".<attribute>" when
 // an attribute of the block carried it, and " via var.<name>" when a changed
-// variable that the block uses did) or pipeline keys that did. Both lists are sorted,
+// variable that the block uses did), pipeline keys or secret rule names that
+// did; a secret's matched text is never kept. Both lists are sorted,
 // distinct and non-nil; Types is empty for a plan, which has no content.
 // access_widened carries the paths and types of the identity_rights lines
 // added at head that carried it.
@@ -34,7 +36,7 @@ type Consequence struct {
 
 // builtinConsequences is the one catalog of consequence classes: for each, the
 // globs over Terraform resource and data types that carry it, or the pipeline
-// keys that do (pipelines.go). Sorted by class
+// keys that do (pipelines.go), or the secret rules that do (secrets.go). Sorted by class
 // and versioned with each release, beside builtin (classes.go) and
 // builtinAreas (areas.go).
 //
@@ -46,12 +48,16 @@ type Consequence struct {
 // access_widened has no patterns of its own: a line added at head that
 // carries identity_rights (a grant added or altered, a variable it uses
 // included) carries access_widened too, with the same path and type.
+//
+// secret_added is read from the lines added at head of any text file that
+// match one of its secret rules; the rule's name is the type.
 var builtinConsequences = []struct {
 	class      string
 	patterns   []string
 	keys       []string
 	attributes map[string][]string // exact type: the top-level attributes whose lines carry the class
 	widens     string              // the class this one accompanies on a line added at head
+	secrets    []secretRule        // the rules whose match on a line added at head carries the class
 }{
 	{class: ConsequenceAccessWidened, widens: ConsequenceIdentityRights},
 	{class: ConsequenceIdentityRights, patterns: []string{
@@ -98,6 +104,7 @@ var builtinConsequences = []struct {
 		// references, only in a definition that carries one of the above
 		"resources.repositories.ref", "extends.template", "stages.template", "jobs.template", "steps.template",
 	}},
+	{class: ConsequenceSecretAdded, secrets: secretRules},
 }
 
 type compiledConsequence struct {
@@ -355,6 +362,23 @@ func span(start, count string) []int {
 	return out
 }
 
+// changedLines returns the old-side and new-side line numbers of f's
+// merge-base..head -U0 diff, a rename diffed across its two paths.
+func changedLines(ctx context.Context, repo, mergeBase, head string, f File) (old, new []int, err error) {
+	args := []string{"--literal-pathspecs", "--attr-source=" + head, "diff", "-U0"}
+	args = append(args, pinnedDiff...)
+	args = append(args, mergeBase, head, "--")
+	if f.OldPath != "" {
+		args = append(args, f.OldPath)
+	}
+	patch, err := git(ctx, repo, append(args, f.Path)...)
+	if err != nil {
+		return nil, nil, err
+	}
+	old, new = hunkLines(patch)
+	return old, new, nil
+}
+
 // collectConsequences finds the consequence classes in the .tf files and
 // pipeline definitions of a change, reading each changed line at head when
 // added and at the merge base when removed. In a .tf file a line takes the
@@ -368,7 +392,9 @@ func span(start, count string) []int {
 // A class read on a line added at head (an altered line is one removed and
 // one added) also adds each class that widens it, access_widened for
 // identity_rights, with the same path and type; the merge-base side adds
-// none. No other file is read. Nil when there are none.
+// none. Every other text file is read only for secret_added: a line added
+// at head that matches a secret rule adds it with the path and the rule name
+// (collectSecrets). Nil when there are none.
 func collectConsequences(ctx context.Context, repo, mergeBase, head string, files []File) ([]Consequence, error) {
 	type side struct {
 		path  string
@@ -379,17 +405,10 @@ func collectConsequences(ctx context.Context, repo, mergeBase, head string, file
 		if f.Binary || !(readable(f.Path) || readable(f.OldPath)) {
 			continue
 		}
-		args := []string{"--literal-pathspecs", "--attr-source=" + head, "diff", "-U0"}
-		args = append(args, pinnedDiff...)
-		args = append(args, mergeBase, head, "--")
-		if f.OldPath != "" {
-			args = append(args, f.OldPath)
-		}
-		patch, err := git(ctx, repo, append(args, f.Path)...)
+		old, new, err := changedLines(ctx, repo, mergeBase, head, f)
 		if err != nil {
 			return nil, err
 		}
-		old, new := hunkLines(patch)
 		oldPath := f.Path
 		if f.OldPath != "" {
 			oldPath = f.OldPath
@@ -403,6 +422,15 @@ func collectConsequences(ctx context.Context, repo, mergeBase, head string, file
 	}
 
 	hits := map[string]*struct{ paths, types map[string]bool }{}
+	record := func(class, p, typ string) {
+		h := hits[class]
+		if h == nil {
+			h = &struct{ paths, types map[string]bool }{map[string]bool{}, map[string]bool{}}
+			hits[class] = h
+		}
+		h.paths[p] = true
+		h.types[typ] = true
+	}
 	for _, at := range []struct {
 		commit string
 		sides  []side
@@ -424,15 +452,6 @@ func collectConsequences(ctx context.Context, repo, mergeBase, head string, file
 			if want[b.path] != nil {
 				blobs = append(blobs, b)
 			}
-		}
-		record := func(class, p, typ string) {
-			h := hits[class]
-			if h == nil {
-				h = &struct{ paths, types map[string]bool }{map[string]bool{}, map[string]bool{}}
-				hits[class] = h
-			}
-			h.paths[p] = true
-			h.types[typ] = true
 		}
 		hit := func(class, p, typ string) {
 			record(class, p, typ)
@@ -531,6 +550,9 @@ func collectConsequences(ctx context.Context, repo, mergeBase, head string, file
 		if err != nil {
 			return nil, err
 		}
+	}
+	if err := collectSecrets(ctx, repo, mergeBase, head, files, record); err != nil {
+		return nil, err
 	}
 	if len(hits) == 0 {
 		return nil, nil

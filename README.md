@@ -104,8 +104,8 @@ area's risk, not the developer's (see [Sensitive areas](#sensitive-areas)).
 A consequence is what a change *does*, read from its changed lines, not where
 it lands. riskelle finds each consequence class in a built-in, versioned
 catalog, mechanically and the same way every time, and records it in the facts
-as `"consequences"`: the class, the paths that triggered it and the block types
-or pipeline keys that did.
+as `"consequences"`: the class, the paths that triggered it and the block types,
+pipeline keys or secret rules that did.
 
 Each class sets a **floor**: the reported level is the higher of the shape
 level (the total's own level, capped at Medium) and every consequence's floor. A floor never changes the total or any
@@ -143,6 +143,7 @@ or absolute glob are refused by name: a repo class can only raise the level.
 | `access_widened` | High | A line added at head that carries `identity_rights`: a grant added or altered, a variable it uses included; the same paths and types |
 | `identity_rights` | Medium | `aws_iam_*`, `azuread_administrative_unit_member`, `azuread_app_role_assignment`, `azuread_application*`, `azuread_directory_role*`, `azuread_group_member`, `azuread_group_role_management_policy`, `azuread_service_principal*`, `azuredevops_*_permissions`, `azuredevops_branch_policy_*`, `azuredevops_check_*`, `azuredevops_environment*`, `azuredevops_group_membership`, `azuredevops_pipeline_authorization`, `azuredevops_resource_authorization`, `azuredevops_securityrole_assignment`, `azuredevops_serviceendpoint_*`, `azurerm_federated_identity_credential`, `azurerm_role_assignment`, `azurerm_role_definition`, `azurerm_user_assigned_identity`, `github_actions_*_oidc_subject_claim_customization_template`, `github_actions_*_permissions`, `github_actions_environment_*`, `github_branch_protection*`, `github_organization_ruleset`, `github_repository_collaborator*`, `github_repository_environment*`, `github_repository_ruleset`, `github_team_members`, `github_team_membership`, `github_team_repository`, `google_*_iam_*` (Terraform types, globs); `azuread_group` only in its `members` or `owners` attribute, reported as `azuread_group.members` or `azuread_group.owners` |
 | `pipeline_identity` | Medium | Pipeline definitions: keys `*serviceConnection`, `azureSubscription*`, `connectedServiceName*`, `environment` (on a job), `id-token: write`, `permissions: write-all`; in a definition that carries any of these, the references `resources.repositories.ref`, `extends.template`, `stages.template`, `jobs.template`, `steps.template` |
+| `secret_added` | High | Added lines of any text file that match a secret rule: `aws_access_key_id`, `azure_storage_account_key`, `github_token`, `google_api_key`, `private_key`, `slack_token` (see Added secrets below) |
 
 - Delivery rights count as identity and rights: Azure DevOps and GitHub service
   connections and their authorisations, deployment environments and their
@@ -227,6 +228,41 @@ catalogued key, so it carries nothing.
   (`permissions: { id-token: write }`) and list-form variables
   (`- name: azureSubscription`) are not read, and an Azure `deployment` must be
   its list item's first key.
+
+**Added secrets.** `secret_added` is a secret committed to the repository: a
+revert does not unleak it, it has to be rotated, so its floor is High. Each
+rule matches within one line, by a fixed prefix and the real token's length,
+so a shorter placeholder does not match:
+
+- `aws_access_key_id`: `AKIA` or `ASIA` followed by exactly 16 upper-case
+  letters or digits, with no letter or digit on either side.
+- `azure_storage_account_key`: `AccountKey=` followed by 86 or more base64
+  characters.
+- `github_token`: `ghp_`, `gho_`, `ghs_` or `ghu_` followed by 36 or more
+  letters or digits, or `github_pat_` followed by 82 or more letters, digits or
+  underscores.
+- `google_api_key`: `AIza` followed by 35 letters, digits, `_` or `-`.
+- `private_key`: a PEM header of five dashes, `BEGIN`, any upper-case words
+  (`RSA`, `EC`, `OPENSSH`, `ENCRYPTED` or none) and `PRIVATE KEY`, or the PGP
+  `PRIVATE KEY BLOCK` form, then five dashes. Public keys and certificates do
+  not match.
+- `slack_token`: `xoxa-`, `xoxb-`, `xoxp-`, `xoxr-` or `xoxs-`, a numeric id,
+  `-` and 10 or more letters, digits or `-`.
+
+What is read, and what is reported:
+
+- Only lines added at head are read, from the head blob: a removed line, an
+  untouched line of a modified file, a deleted file and a pure rename carry
+  nothing; an altered line that still holds the secret counts.
+- Every text file is read, whatever its class (docs, tests, generated, lock or
+  vendored); a file git reports binary, a symlink and a submodule are not.
+- There is no allow-list and no entropy or validity check: a full-length
+  lookalike floors. Write a placeholder shorter than the rule, or build a test
+  sample at runtime.
+- The consequence names the path and the rule; the matched text is never in
+  the facts or the report.
+- It is not the `secrets` sensitive area, which is read from paths alone and is
+  reviewer context only (see [Sensitive areas](#sensitive-areas)).
 
 ### Test files
 
@@ -425,7 +461,8 @@ change carries sit under `"consequences"` (class, paths, types and floor; `[]`
 when none) and, in Markdown, under "Consequences (floor the level)", shown only
 when there is one. A consequence floored by a production root carries
 `"production_roots"`, and its Markdown line reads `floor High (production root
-…)`. Every report also carries `"shape_level"`, the level of the total
+…)`. A `secret_added` consequence's types are its secret rule names; the report
+never contains the matched text. Every report also carries `"shape_level"`, the level of the total
 alone, beside `"level"`; it never exceeds Medium, whatever the total.
 `"level"` is High only when a consequence's floor is High. When a consequence
 floor raises the level above the shape level,

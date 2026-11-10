@@ -125,7 +125,8 @@ func Default() Rules {
 		ShapeCap: Medium,
 
 		// A consequence raises the level to at least its floor, never the total.
-		// access_widened is the built-in High floor: a grant added or altered.
-		ConsequenceFloors: []Floor{{facts.ConsequenceAccessWidened, High}, {facts.ConsequenceIdentityRights, Medium}, {facts.ConsequencePipelineIdentity, Medium}},
+		// access_widened (a grant added or altered) and secret_added (a secret
+		// committed, which a revert does not unleak) are the built-in High floors.
+		ConsequenceFloors: []Floor{{facts.ConsequenceAccessWidened, High}, {facts.ConsequenceIdentityRights, Medium}, {facts.ConsequencePipelineIdentity, Medium}, {facts.ConsequenceSecretAdded, High}},
 	}
 }

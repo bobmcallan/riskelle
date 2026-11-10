@@ -189,7 +189,7 @@ func TestIdentityRightsCatalog(t *testing.T) {
 			t.Errorf("attributeConsequencesOf(%q, %q) = %v, want %v", tt.typ, tt.attr, got, tt.want)
 		}
 	}
-	if !IsConsequence(ConsequenceIdentityRights) || !IsConsequence(ConsequencePipelineIdentity) || !IsConsequence(ConsequenceAccessWidened) || IsConsequence("root_access") {
+	if !IsConsequence(ConsequenceIdentityRights) || !IsConsequence(ConsequencePipelineIdentity) || !IsConsequence(ConsequenceAccessWidened) || !IsConsequence(ConsequenceSecretAdded) || IsConsequence("root_access") {
 		t.Error("IsConsequence does not match the catalog")
 	}
 }
@@ -234,6 +234,9 @@ func TestReadmeListsConsequences(t *testing.T) {
 	cons := section("### Consequences")
 	for _, c := range builtinConsequences {
 		names := append(append([]string{c.class}, c.patterns...), c.keys...)
+		for _, r := range c.secrets {
+			names = append(names, r.name)
+		}
 		for typ, attrs := range c.attributes {
 			names = append(names, typ)
 			for _, a := range attrs {
@@ -261,6 +264,9 @@ func TestReadmeListsConsequences(t *testing.T) {
 	}
 	if !strings.Contains(cons, "| `access_widened` | High |") || !strings.Contains(cons, "added at head") {
 		t.Error("README Consequences does not give access_widened its High row and rule")
+	}
+	if !strings.Contains(cons, "| `secret_added` | High |") || !strings.Contains(cons, "**Added secrets.**") {
+		t.Error("README Consequences does not give secret_added its High row and rules")
 	}
 	for _, s := range []string{"resource", "data", ".tf"} {
 		if !strings.Contains(cons, "`"+s+"`") {
