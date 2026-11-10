@@ -6,10 +6,11 @@
 [agents.executor]
 command = "session"
 
-# Dispatched planner: reads the repo and hands back a `plan` artifact.
+# Dispatched planner: Fable 5.2 on the claude CLI; reads the repo and hands
+# back a `plan` artifact.
 [agents.planner]
 command = "claude"
-model = "opus"
+model = "claude-fable-5-2"
 effort = "high"
 tools = ["Read", "Grep", "Glob", "Bash(satelle story attach:*)", "Bash(satelle story get:*)"]
 
