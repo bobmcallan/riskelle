@@ -13,11 +13,11 @@ model = "opus"
 effort = "high"
 tools = ["Read", "Grep", "Glob", "Bash(satelle story attach:*)", "Bash(satelle story get:*)"]
 
-# The gates' judge: Gemini 3.8 flash on pi through the Cursor provider.
+# The gates' judge: Gemini 3.8 flash on Cursor's own CLI (effort lives in the
+# model id; read-only grant runs ask mode with every shell command denied).
 [agents.reviewer-alt]
-command = "pi -e /home/bobmcallan/.pi/agent/npm/node_modules/@rahularya01/pi-cursor"
-model = "cursor/gemini-3.8-flash"
-effort = "off"
+command = "cursor-agent"
+model = "gemini-3.8-flash-low"
 tools = ["Read", "Grep", "Glob"]
 
 # Second plan judge: both must accept a plan.
