@@ -45,8 +45,8 @@ func updates(method string) bool {
 //
 // The class is definition_update when the command only updates an existing
 // definition, which the service keeps every revision of: an invoke PUT or
-// PATCH whose --resource is definitions, "az pipelines update", or a PUT or
-// PATCH to a definitions URL. Every other write is definition_write: a POST
+// PATCH whose --resource is definitions, the pipelines group's update verb,
+// or a PUT or PATCH to a definitions URL. Every other write is definition_write: a POST
 // or DELETE, an invoke on another resource or none named, and the create,
 // delete and release verbs.
 func definitionWrite(cmd string) definitionCmd {
