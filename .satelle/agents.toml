@@ -6,13 +6,14 @@
 [agents.executor]
 command = "session"
 
-# Dispatched planner: Fable 5.2 on the claude CLI; reads the repo and hands
-# back a `plan` artifact.
+# Dispatched planner: Fable 5.2 on Cursor's own CLI (effort lives in the model
+# id; Cursor lists every Fable model as NO ZDR). A read-only grant runs ask
+# mode with every shell command denied; satelle attaches the `plan` artifact
+# it hands back.
 [agents.planner]
-command = "claude"
-model = "claude-fable-5-2"
-effort = "high"
-tools = ["Read", "Grep", "Glob", "Bash(satelle story attach:*)", "Bash(satelle story get:*)"]
+command = "cursor-agent"
+model = "claude-fable-5-2-high"
+tools = ["Read", "Grep", "Glob"]
 
 # The gates' judge: Gemini 3.8 flash on Cursor's own CLI (effort lives in the
 # model id; read-only grant runs ask mode with every shell command denied).
