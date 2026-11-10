@@ -144,8 +144,10 @@ func Score(f facts.Facts, r Rules) Result {
 	}
 }
 
-// consequences gives each consequence in the facts, and each repo class a
-// changed or planned path carries (repoConsequences), sorted by class, its
+// consequences gives each consequence in the facts, production_deploy when a
+// changed definition deploys to a production environment (deployConsequences),
+// and each repo class a changed or planned path carries (repoConsequences),
+// sorted by class, its
 // floor from the rules: the built-in floor or the repo class's, copying its
 // lists so the result aliases nothing. A class with no floor gets the lowest
 // level, so it is reported and raises nothing. A consequence with any path
@@ -157,7 +159,8 @@ func Score(f facts.Facts, r Rules) Result {
 // why: its built-in class's own floor, its repo class's own floor, or a
 // production root that raised a lower floor. Nil when there are none.
 func consequences(f facts.Facts, r Rules) ([]Consequence, []Trigger) {
-	found := append(append([]facts.Consequence{}, f.Consequences...), repoConsequences(f.Files, r.RepoClasses)...)
+	found := append(append([]facts.Consequence{}, f.Consequences...), deployConsequences(f.Files, r.ProductionEnvironments)...)
+	found = append(found, repoConsequences(f.Files, r.RepoClasses)...)
 	if len(found) == 0 {
 		return nil, nil
 	}
@@ -220,6 +223,35 @@ func consequences(f facts.Facts, r Rules) ([]Consequence, []Trigger) {
 		}
 	}
 	return out, triggers
+}
+
+// deployConsequences gives production_deploy the changed paths whose job
+// environments (facts.File.Environments) name a production environment in
+// names (facts.IsProduction), typed by those environments as written; both
+// sorted and distinct. Nil when none does.
+func deployConsequences(files []facts.File, names []string) []facts.Consequence {
+	paths, types := map[string]bool{}, map[string]bool{}
+	for _, file := range files {
+		for _, env := range file.Environments {
+			if facts.IsProduction(env, names) {
+				paths[file.Path], types[env] = true, true
+			}
+		}
+	}
+	if len(paths) == 0 {
+		return nil
+	}
+	return []facts.Consequence{{Class: facts.ConsequenceProductionDeploy, Paths: keys(paths), Types: keys(types)}}
+}
+
+// keys returns a set's members, sorted.
+func keys(set map[string]bool) []string {
+	out := make([]string, 0, len(set))
+	for k := range set {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // repoConsequences gives each repo class, in rules order, the changed or

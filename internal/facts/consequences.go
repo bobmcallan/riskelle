@@ -17,6 +17,7 @@ const (
 	ConsequenceAccessWidened    = "access_widened"
 	ConsequenceIdentityRights   = "identity_rights"
 	ConsequencePipelineIdentity = "pipeline_identity"
+	ConsequenceProductionDeploy = "production_deploy"
 )
 
 // Consequence is one class a change carries, the changed or planned paths
@@ -46,6 +47,10 @@ type Consequence struct {
 // access_widened has no patterns of its own: a line added at head that
 // carries identity_rights (a grant added or altered, a variable it uses
 // included) carries access_widened too, with the same path and type.
+//
+// production_deploy has no patterns or keys either: score reads it from the
+// job environments of a changed pipeline definition (File.Environments) and
+// the rules' production environment names.
 var builtinConsequences = []struct {
 	class      string
 	patterns   []string
@@ -98,6 +103,7 @@ var builtinConsequences = []struct {
 		// references, only in a definition that carries one of the above
 		"resources.repositories.ref", "extends.template", "stages.template", "jobs.template", "steps.template",
 	}},
+	{class: ConsequenceProductionDeploy},
 }
 
 type compiledConsequence struct {
@@ -369,13 +375,18 @@ func span(start, count string) []int {
 // one added) also adds each class that widens it, access_widened for
 // identity_rights, with the same path and type; the merge-base side adds
 // none. No other file is read. Nil when there are none.
+//
+// It also sets each changed pipeline definition's Environments in files: the
+// job environments it names at each side it has changed lines on (head when
+// lines were added, the merge base when removed), sorted and distinct.
 func collectConsequences(ctx context.Context, repo, mergeBase, head string, files []File) ([]Consequence, error) {
 	type side struct {
 		path  string
 		lines []int
+		file  int // the index in files
 	}
 	var heads, bases []side
-	for _, f := range files {
+	for i, f := range files {
 		if f.Binary || !(readable(f.Path) || readable(f.OldPath)) {
 			continue
 		}
@@ -395,14 +406,15 @@ func collectConsequences(ctx context.Context, repo, mergeBase, head string, file
 			oldPath = f.OldPath
 		}
 		if len(new) > 0 && readable(f.Path) {
-			heads = append(heads, side{f.Path, new})
+			heads = append(heads, side{f.Path, new, i})
 		}
 		if len(old) > 0 && readable(oldPath) {
-			bases = append(bases, side{oldPath, old})
+			bases = append(bases, side{oldPath, old, i})
 		}
 	}
 
 	hits := map[string]*struct{ paths, types map[string]bool }{}
+	envs := map[int]map[string]bool{} // job environments by index in files
 	for _, at := range []struct {
 		commit string
 		sides  []side
@@ -411,9 +423,9 @@ func collectConsequences(ctx context.Context, repo, mergeBase, head string, file
 		if len(at.sides) == 0 {
 			continue
 		}
-		want := map[string][]int{}
+		want, index := map[string][]int{}, map[string]int{}
 		for _, s := range at.sides {
-			want[s.path] = s.lines
+			want[s.path], index[s.path] = s.lines, s.file
 		}
 		all, err := treeBlobs(ctx, repo, at.commit)
 		if err != nil {
@@ -467,7 +479,13 @@ func collectConsequences(ctx context.Context, repo, mergeBase, head string, file
 				return
 			}
 			if !isTerraform(p) {
-				marks := pipelineIdentity(content)
+				marks, names := pipelineIdentity(content)
+				for _, name := range names {
+					if envs[index[p]] == nil {
+						envs[index[p]] = map[string]bool{}
+					}
+					envs[index[p]][name] = true
+				}
 				for _, n := range want[p] {
 					if n >= 1 && n <= len(marks) && marks[n-1] != "" {
 						hit(ConsequencePipelineIdentity, p, marks[n-1])
@@ -531,6 +549,9 @@ func collectConsequences(ctx context.Context, repo, mergeBase, head string, file
 		if err != nil {
 			return nil, err
 		}
+	}
+	for i, set := range envs {
+		files[i].Environments = sorted(set)
 	}
 	if len(hits) == 0 {
 		return nil, nil

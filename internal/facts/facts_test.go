@@ -140,3 +140,16 @@ func TestFileJSONReferrers(t *testing.T) {
 		t.Errorf("JSON without referrers = %s, want no referrers key", plain)
 	}
 }
+
+// TestFileEnvironmentsJSON pins that a file's job environments are omitted
+// when nil, so facts without one keep their JSON.
+func TestFileEnvironmentsJSON(t *testing.T) {
+	plain, _ := json.Marshal(File{Path: "a.go"})
+	deploy, _ := json.Marshal(File{Path: "pipelines/release.yml", Added: 1, Environments: []string{"dev", "prd"}})
+	if strings.Contains(string(plain), "environments") {
+		t.Errorf("JSON without environments = %s, want no environments key", plain)
+	}
+	if want := `{"path":"pipelines/release.yml","added":1,"removed":0,"environments":["dev","prd"]}`; string(deploy) != want {
+		t.Errorf("JSON = %s, want %s", deploy, want)
+	}
+}

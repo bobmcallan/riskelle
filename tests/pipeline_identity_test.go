@@ -15,7 +15,7 @@ import (
 )
 
 // releaseYML models a release pipeline that runs as a deploy identity: a
-// deployment job to the prod environment with an Azure CLI step on a service
+// deployment job to the dev environment with an Azure CLI step on a service
 // connection.
 const releaseYML = `trigger: none
 
@@ -26,7 +26,7 @@ stages:
 - stage: Release
   jobs:
   - deployment: DeployGraph
-    environment: prod
+    environment: dev
     strategy:
       runOnce:
         deploy:
@@ -65,7 +65,7 @@ const workflowYML = `on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    environment: prod
+    environment: dev
     permissions:
       id-token: write
       contents: read

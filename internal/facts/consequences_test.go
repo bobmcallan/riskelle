@@ -189,7 +189,8 @@ func TestIdentityRightsCatalog(t *testing.T) {
 			t.Errorf("attributeConsequencesOf(%q, %q) = %v, want %v", tt.typ, tt.attr, got, tt.want)
 		}
 	}
-	if !IsConsequence(ConsequenceIdentityRights) || !IsConsequence(ConsequencePipelineIdentity) || !IsConsequence(ConsequenceAccessWidened) || IsConsequence("root_access") {
+	if !IsConsequence(ConsequenceIdentityRights) || !IsConsequence(ConsequencePipelineIdentity) || !IsConsequence(ConsequenceAccessWidened) ||
+		!IsConsequence(ConsequenceProductionDeploy) || IsConsequence("root_access") {
 		t.Error("IsConsequence does not match the catalog")
 	}
 }

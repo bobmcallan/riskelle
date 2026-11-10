@@ -31,6 +31,10 @@ type File struct {
 	// none: "Shell" for an extensionless file whose first line is a shell
 	// shebang; "" otherwise.
 	Language string `json:"language,omitempty"`
+	// A pipeline definition with changed lines only: the job environments it
+	// names, as written, at each side it changed on; sorted and distinct, nil
+	// when none.
+	Environments []string `json:"environments,omitempty"`
 }
 
 // Facts are the collected facts about one change. Every slice is sorted and

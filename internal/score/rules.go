@@ -76,6 +76,12 @@ type Rules struct {
 	// and always hashed; .risk/rules.json may not set them.
 	ConsequenceFloors []Floor `json:"consequence_floors"`
 
+	// The job environment names a pipeline definition deploys to production
+	// with (facts.IsProduction): a changed definition naming one carries
+	// production_deploy. Always set and always hashed; .risk/rules.json may
+	// not set it.
+	ProductionEnvironments []string `json:"production_environments"`
+
 	// Repo-named production roots (.risk/rules.json): directory globs. A
 	// consequence with a path under one is floored at the highest level.
 	// Omitted when empty, so the built-in rules hash as before.
@@ -126,6 +132,12 @@ func Default() Rules {
 
 		// A consequence raises the level to at least its floor, never the total.
 		// access_widened is the built-in High floor: a grant added or altered.
-		ConsequenceFloors: []Floor{{facts.ConsequenceAccessWidened, High}, {facts.ConsequenceIdentityRights, Medium}, {facts.ConsequencePipelineIdentity, Medium}},
+		// production_deploy is High too: a change to a pipeline that deploys
+		// to production.
+		ConsequenceFloors: []Floor{
+			{facts.ConsequenceAccessWidened, High}, {facts.ConsequenceIdentityRights, Medium},
+			{facts.ConsequencePipelineIdentity, Medium}, {facts.ConsequenceProductionDeploy, High},
+		},
+		ProductionEnvironments: []string{"prd", "prod", "production"},
 	}
 }

@@ -105,7 +105,9 @@ A consequence is what a change *does*, read from its changed lines, not where
 it lands. riskelle finds each consequence class in a built-in, versioned
 catalog, mechanically and the same way every time, and records it in the facts
 as `"consequences"`: the class, the paths that triggered it and the block types
-or pipeline keys that did.
+or pipeline keys that did. A changed pipeline definition also records the job
+environments it names as `"environments"` on its file, from which score reads
+`production_deploy`.
 
 Each class sets a **floor**: the reported level is the higher of the shape
 level (the total's own level, capped at Medium) and every consequence's floor. A floor never changes the total or any
@@ -143,6 +145,7 @@ or absolute glob are refused by name: a repo class can only raise the level.
 | `access_widened` | High | A line added at head that carries `identity_rights`: a grant added or altered, a variable it uses included; the same paths and types |
 | `identity_rights` | Medium | `aws_iam_*`, `azuread_administrative_unit_member`, `azuread_app_role_assignment`, `azuread_application*`, `azuread_directory_role*`, `azuread_group_member`, `azuread_group_role_management_policy`, `azuread_service_principal*`, `azuredevops_*_permissions`, `azuredevops_branch_policy_*`, `azuredevops_check_*`, `azuredevops_environment*`, `azuredevops_group_membership`, `azuredevops_pipeline_authorization`, `azuredevops_resource_authorization`, `azuredevops_securityrole_assignment`, `azuredevops_serviceendpoint_*`, `azurerm_federated_identity_credential`, `azurerm_role_assignment`, `azurerm_role_definition`, `azurerm_user_assigned_identity`, `github_actions_*_oidc_subject_claim_customization_template`, `github_actions_*_permissions`, `github_actions_environment_*`, `github_branch_protection*`, `github_organization_ruleset`, `github_repository_collaborator*`, `github_repository_environment*`, `github_repository_ruleset`, `github_team_members`, `github_team_membership`, `github_team_repository`, `google_*_iam_*` (Terraform types, globs); `azuread_group` only in its `members` or `owners` attribute, reported as `azuread_group.members` or `azuread_group.owners` |
 | `pipeline_identity` | Medium | Pipeline definitions: keys `*serviceConnection`, `azureSubscription*`, `connectedServiceName*`, `environment` (on a job), `id-token: write`, `permissions: write-all`; in a definition that carries any of these, the references `resources.repositories.ref`, `extends.template`, `stages.template`, `jobs.template`, `steps.template` |
+| `production_deploy` | High | A pipeline definition with any changed line whose job `environment` is `prd`, `prod` or `production`, ignoring case, or starts with one followed by a non-letter (`prd-aue`); typed by the environment as written |
 
 - Delivery rights count as identity and rights: Azure DevOps and GitHub service
   connections and their authorisations, deployment environments and their
@@ -227,6 +230,32 @@ catalogued key, so it carries nothing.
   (`permissions: { id-token: write }`) and list-form variables
   (`- name: azureSubscription`) are not read, and an Azure `deployment` must be
   its list item's first key.
+
+**Production deploys.** `production_deploy` is a change to a pipeline that
+deploys to production, floor High: what such a pipeline runs, runs against
+production, so any changed line counts, a script line, a comment or a blank
+line included.
+
+- A job environment is the `environment` that `pipeline_identity` reads (a
+  direct key of an Azure `- deployment:` item, or `jobs.<job_id>.environment`
+  in a GitHub workflow), named by its scalar value or by the `name:` directly
+  under its mapping form.
+- It names production when, ignoring case, it is `prd`, `prod` or
+  `production`, or starts with one followed by a character that is not a
+  letter (`prd-aue`, `prod_eu`, `production.web`); `product`, `pre-prod` and
+  `nonprod` do not. The consequence's types are the environment names as
+  written. The names are built in, recorded in the rules hash, and refused by
+  name if `.risk/rules.json` sets them.
+- Each side a definition changed on is read: head when the change adds a line
+  to it, the merge base when it removes one, so changing `prd` to `dev` still
+  carries the class.
+- A templated name (`${{ parameters.environment }}`) is not traced to its
+  caller, and a name that ends in a production name (`aue-prd`) does not
+  match.
+- A deploy to `dev` or `test` carries no `production_deploy`: a changed
+  catalogued line carries `pipeline_identity` alone, at Medium. Splitting a
+  change cannot lower the floor: the class lands in whichever change touches
+  the definition.
 
 ### Test files
 
@@ -396,7 +425,9 @@ a JSON plan file that predicts the change:
   "consequences": ["identity_rights"]}` or `{"path": "pipelines/release.yml",
   "added": 40, "consequences": ["pipeline_identity"]}`; see
   [Consequences](#consequences). A planned path that adds or alters a grant
-  names both, `"consequences": ["identity_rights", "access_widened"]`. An
+  names both, `"consequences": ["identity_rights", "access_widened"]`, and a
+  planned change to a pipeline that deploys to production names
+  `"production_deploy"`. An
   unknown class, or one listed twice for a path, is refused by name. It names
   built-in classes only: a repo class is found from the planned path, by the
   globs in the target's rules, as for a real diff.
@@ -516,7 +547,8 @@ line it leaves for reviewers, is in the skill file itself.
 ## Rules
 
 - **Built in, versioned with each release:** the measures, weights, bands,
-  consequence floors (`consequence_floors`), the shape cap (`shape_cap`) and default patterns. Changed only by a riskelle release, so the scale is the same
+  consequence floors (`consequence_floors`), the shape cap (`shape_cap`), the
+  production environment names (`production_environments`) and default patterns. Changed only by a riskelle release, so the scale is the same
   everywhere.
 - **`.risk/rules.json` in the assessed repo:** settings that can only *add*
   risk or context (extra generated paths for the report, extra sensitive
