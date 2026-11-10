@@ -131,12 +131,20 @@ func Default() Rules {
 		ShapeCap: Medium,
 
 		// A consequence raises the level to at least its floor, never the total.
-		// access_widened is the built-in High floor: a grant added or altered.
-		// production_deploy is High too: a change to a pipeline that deploys
-		// to production.
+		// access_widened is High: a grant added or altered.
+		// definition_write is High: a revert cannot undo a write made out of band.
+		// destructive_migration is High: once a migration runs, the data is gone.
+		// production_deploy is High: a change to a pipeline that deploys to
+		// production.
+		// stateful_destroy is High: a stateful resource removed.
 		ConsequenceFloors: []Floor{
-			{facts.ConsequenceAccessWidened, High}, {facts.ConsequenceIdentityRights, Medium},
-			{facts.ConsequencePipelineIdentity, Medium}, {facts.ConsequenceProductionDeploy, High},
+			{facts.ConsequenceAccessWidened, High},
+			{facts.ConsequenceDefinitionWrite, High},
+			{facts.ConsequenceDestructiveMigration, High},
+			{facts.ConsequenceIdentityRights, Medium},
+			{facts.ConsequencePipelineIdentity, Medium},
+			{facts.ConsequenceProductionDeploy, High},
+			{facts.ConsequenceStatefulDestroy, High},
 		},
 		ProductionEnvironments: []string{"prd", "prod", "production"},
 	}
