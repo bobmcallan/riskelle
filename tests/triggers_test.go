@@ -15,11 +15,13 @@ import (
 
 // TestTriggersReported drives the built binary over a fixture whose target
 // rules name prod-tenant/** a production root. A role assignment added under
-// the root fires one trigger: the report is High, its "triggers" names the
-// class, the path, the matched type and why, and the Markdown lists it;
-// estimate agrees. The same grant under sandbox/ fires none: the report is
-// Medium, "triggers" is [] and the Markdown says none fired. In both the
-// level is High exactly when triggers is not empty.
+// the root fires two triggers: access_widened by its class and identity_rights
+// by the production root; the report is High, its "triggers" names each
+// class, the path, the matched type and why, and the Markdown lists them;
+// estimate with a plan naming identity_rights agrees on that one. A grant
+// removed under sandbox/ fires none: the report is Medium, "triggers" is []
+// and the Markdown says none fired. In both the level is High exactly when
+// triggers is not empty.
 func TestTriggersReported(t *testing.T) {
 	bin := buildRiskelle(t, t.TempDir())
 	base := map[string]string{
@@ -50,12 +52,14 @@ func TestTriggersReported(t *testing.T) {
 	t.Run("one trigger", func(t *testing.T) {
 		dir := rulesFixture(t, base, map[string]string{"prod-tenant/identity.tf": tfRole})
 		got := decodeReport(t, run(t, dir))
-		want := `[{"class":"identity_rights","paths":["prod-tenant/identity.tf"],"types":["azurerm_role_assignment"],"why":"production_root"}]`
+		want := `[{"class":"access_widened","paths":["prod-tenant/identity.tf"],"types":["azurerm_role_assignment"],"why":"class"},` +
+			`{"class":"identity_rights","paths":["prod-tenant/identity.tf"],"types":["azurerm_role_assignment"],"why":"production_root"}]`
 		if got.Level != score.High || got.ShapeLevel != score.Low || triggers(t, got) != want {
 			t.Errorf("level %s shape %s triggers %s, want High, Low, %s", got.Level, got.ShapeLevel, triggers(t, got), want)
 		}
 		md := run(t, dir, "--format", "markdown")
 		for _, w := range []string{"### " + report.TriggerHeading + "\n\n" + report.TriggerNote,
+			"- access_widened, High by class: paths `prod-tenant/identity.tf`; types `azurerm_role_assignment`",
 			"- identity_rights, High by production_root: paths `prod-tenant/identity.tf`; types `azurerm_role_assignment`"} {
 			if !strings.Contains(md, w) {
 				t.Errorf("markdown lacks %q:\n%s", w, md)
@@ -81,7 +85,11 @@ func TestTriggersReported(t *testing.T) {
 	})
 
 	t.Run("none", func(t *testing.T) {
-		dir := rulesFixture(t, base, map[string]string{"sandbox/identity.tf": tfRole})
+		withGrant := map[string]string{"sandbox/identity.tf": tfStorage + "\n" + tfRole}
+		for k, v := range base {
+			withGrant[k] = v
+		}
+		dir := rulesFixture(t, withGrant, map[string]string{"sandbox/identity.tf": tfStorage})
 		out := run(t, dir)
 		got := decodeReport(t, out)
 		if got.Level != score.Medium || triggers(t, got) != "[]" || !strings.Contains(out, `"triggers": []`) {
