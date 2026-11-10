@@ -423,8 +423,20 @@ floor raises the level above the shape level,
 Markdown opens with a line stating the shape level, the floor that set the
 level and that splitting the change will not lower it. A flow can route a
 floored change on a non-empty `"floored_by"` (for example, hold it for an
-owner's approval) rather than return it to be split. The same result always
-prints the same bytes.
+owner's approval) rather than return it to be split.
+
+Every report also carries `"triggers"`: one entry per consequence whose floor
+is High, sorted by class, `[]` when none. Each names its `class`, the `paths`
+and `types` that are its evidence, and `"why"` it is High: `class` (the
+built-in class's own floor), `repo_class` (the repo class's own floor) or
+`production_root` (a production root raised a lower floor). The Markdown lists
+them under "Triggers", or states that none fired and the level cannot be High.
+Triggers are the contract a gate keys on: with the shape level capped at
+Medium, a change is High if and only if `"triggers"` is not empty, so a gate
+(a lane's land-ready check, an owner's approval) tests `triggers`, for example
+`jq -e '.triggers == []'`, not `level`, `floored_by` or the floors, and names
+each trigger's evidence when it holds a change. The same result always prints
+the same bytes.
 
 ## With satelle
 

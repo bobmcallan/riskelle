@@ -12,6 +12,10 @@ Diff of head `2222222222222222222222222222222222222222` against base `1111111111
 
 </details>
 
+### Triggers
+
+None fired: no consequence is floored at High, so the level cannot be High.
+
 ### Where it lands (context, not scored)
 
 Where the change lands is context for reviewers; it does not count towards the score.

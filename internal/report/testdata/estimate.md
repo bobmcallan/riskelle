@@ -16,6 +16,10 @@ Shape level Low; the level is Medium, set by the consequence floor of identity_r
 
 </details>
 
+### Triggers
+
+None fired: no consequence is floored at High, so the level cannot be High.
+
 ### Consequences (floor the level)
 
 Each consequence raises the level to at least its floor; it never changes the total or the breakdown.

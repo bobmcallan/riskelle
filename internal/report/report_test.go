@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"flag"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -137,7 +138,7 @@ func TestReportCarriesResult(t *testing.T) {
 	none := render(t, "json", noAreasFixture())
 	for _, s := range []string{`"kind": "score"`, `"base": "` + strings.Repeat("1", 40) + `"`,
 		`"head": "` + strings.Repeat("2", 40) + `"`, `"areas": []`, `"consequences": []`, `"note": "` + Note,
-		`"shape_level": "Low"`, `"floored_by": []`} {
+		`"shape_level": "Low"`, `"floored_by": []`, `"triggers": []`} {
 		if !bytes.Contains(none, []byte(s)) {
 			t.Errorf("no-areas JSON lacks %s:\n%s", s, none)
 		}
@@ -203,7 +204,9 @@ func TestReadmeDocumentsReportConsequences(t *testing.T) {
 	}
 	for _, want := range []string{"`\"consequences\"`", FloorHeading,
 		"`\"shape_level\"`", "`\"floored_by\"`", "splitting the change will not lower it",
-		"never exceeds Medium", "High only when a consequence's floor is High"} {
+		"never exceeds Medium", "High only when a consequence's floor is High",
+		"`\"triggers\"`", "`\"why\"`", "`" + score.WhyClass + "`", "`" + score.WhyRepoClass + "`",
+		"`" + score.WhyProductionRoot + "`", TriggerHeading, "a gate keys on"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("README Report section lacks %s", want)
 		}
@@ -257,6 +260,98 @@ func TestMarkdownStatesFloor(t *testing.T) {
 		}
 		if name == "medium at its floor" && !strings.Contains(md, FloorHeading) {
 			t.Errorf("%s: consequences section missing:\n%s", name, md)
+		}
+	}
+}
+
+// TestMarkdownListsTriggers pins the Triggers section: always shown after the
+// facts and before the consequences; with a trigger, its note and one line
+// each with the evidence and why; with none, the statement that none fired.
+func TestMarkdownListsTriggers(t *testing.T) {
+	r := estimateFixture()
+	r.Level, r.FlooredBy = score.High, []string{"identity_rights"}
+	r.Consequences[0].Floor = score.High
+	r.Consequences[0].ProductionRoots = []string{"iam/**"}
+	r.Triggers = []score.Trigger{
+		{Consequence: facts.Consequence{Class: "identity_rights", Paths: []string{"iam/roles.tf"}, Types: []string{}}, Why: score.WhyProductionRoot},
+		{Consequence: facts.Consequence{Class: "release_guard", Paths: []string{"a.sh", "b.sh"}, Types: []string{"t"}}, Why: score.WhyRepoClass},
+	}
+	md := string(render(t, "markdown", r))
+	for _, want := range []string{"### " + TriggerHeading + "\n\n" + TriggerNote + "\n\n",
+		"- identity_rights, High by production_root: paths `iam/roles.tf`; types none (planned)\n",
+		"- release_guard, High by repo_class: paths `a.sh`, `b.sh`; types `t`\n"} {
+		if !strings.Contains(md, want) {
+			t.Errorf("markdown lacks %q:\n%s", want, md)
+		}
+	}
+	if strings.Contains(md, NoTriggers) {
+		t.Errorf("markdown with triggers says none fired:\n%s", md)
+	}
+	if i, d, f := strings.Index(md, "### "+TriggerHeading), strings.Index(md, "</details>"), strings.Index(md, FloorHeading); !(d < i && i < f) {
+		t.Errorf("triggers section not between the facts and the consequences:\n%s", md)
+	}
+	for name, r := range map[string]Report{"estimate": estimateFixture(), "no areas": noAreasFixture()} {
+		md := string(render(t, "markdown", r))
+		if !strings.Contains(md, "### "+TriggerHeading+"\n\n"+NoTriggers+"\n") || strings.Contains(md, "High by") || strings.Contains(md, TriggerNote) {
+			t.Errorf("%s: want the heading and that none fired:\n%s", name, md)
+		}
+	}
+}
+
+// TestHighIffTriggers pins that a change is High if and only if its triggers
+// are not empty, over every pairing of a total (0, 25 or 50, the last in the
+// High band) with a consequence set firing 0, 1 or 2 triggers. The rules are
+// written here, so recalibrating the built-in bands cannot churn it; the
+// shape cap is Medium, as built in (sto_4478ef95), so volume alone is never
+// High.
+func TestHighIffTriggers(t *testing.T) {
+	rules := score.Rules{
+		SizeLines:         score.Bands{{Min: 0, Points: 0}, {Min: 100, Points: 25}, {Min: 200, Points: 50}},
+		Levels:            []score.LevelEdge{{Min: 0, Level: score.Low}, {Min: 20, Level: score.Medium}, {Min: 40, Level: score.High}},
+		ShapeCap:          score.Medium,
+		ConsequenceFloors: []score.Floor{{Class: "data_loss", Level: score.High}, {Class: facts.ConsequenceIdentityRights, Level: score.Medium}},
+		ProductionRoots:   []string{"prod/**"},
+		RepoClasses:       []score.RepoClass{{Class: "release_guard", Paths: []string{"guard/*"}, Floor: score.High}},
+	}
+	grant := func(path string) facts.Consequence {
+		return facts.Consequence{Class: facts.ConsequenceIdentityRights, Paths: []string{path}, Types: []string{"azurerm_role_assignment"}}
+	}
+	guard := facts.File{Path: "guard/allow"}
+	sets := []struct {
+		name     string
+		cs       []facts.Consequence
+		files    []facts.File
+		triggers int
+	}{
+		{"no consequence", nil, nil, 0},
+		{"identity_rights outside a root", []facts.Consequence{grant("iam/x.tf")}, nil, 0},
+		{"identity_rights under a root", []facts.Consequence{grant("prod/x.tf")}, nil, 1},
+		{"a High built-in class", []facts.Consequence{{Class: "data_loss", Paths: []string{"db/x.tf"}, Types: []string{}}}, nil, 1},
+		{"a High repo class", nil, []facts.File{guard}, 1},
+		{"the root grant and the repo class", []facts.Consequence{grant("prod/x.tf")}, []facts.File{guard}, 2},
+	}
+	for _, lines := range []int{0, 100, 200} {
+		for _, set := range sets {
+			t.Run(fmt.Sprintf("%d lines, %s", lines, set.name), func(t *testing.T) {
+				f := facts.Facts{Files: append([]facts.File{{Path: "main.go", Added: lines}}, set.files...), Consequences: set.cs}
+				r := New(KindScore, score.Score(f, rules))
+				if len(r.Triggers) != set.triggers {
+					t.Errorf("%d triggers %+v, want %d", len(r.Triggers), r.Triggers, set.triggers)
+				}
+				if high := r.Level == score.High; high != (len(r.Triggers) > 0) {
+					t.Errorf("total %d level %s with %d triggers: want High if and only if a trigger fired", r.Total, r.Level, len(r.Triggers))
+				}
+				if lines == 200 && r.Total < 40 {
+					t.Errorf("total %d, want one in the High band", r.Total)
+				}
+				if r.ShapeLevel == score.High {
+					t.Errorf("shape level High at total %d", r.Total)
+				}
+				js := string(render(t, "json", r))
+				if none := strings.Contains(js, `"triggers": []`); none != (set.triggers == 0) {
+					t.Errorf(`"triggers": [] in the JSON = %v, want %v:\n%s`, none, set.triggers == 0, js)
+				}
+			})
 		}
 	}
 }

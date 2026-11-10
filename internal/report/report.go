@@ -36,6 +36,15 @@ const FloorNote = "Each consequence raises the level to at least its floor; it n
 // cannot be lowered by splitting the change.
 const SplitNote = "Splitting the change will not lower it: a consequence lands in whichever change carries it."
 
+// TriggerHeading titles the Markdown section listing triggers.
+const TriggerHeading = "Triggers"
+
+// TriggerNote explains triggers, when there is one.
+const TriggerNote = "Each trigger is a consequence floored at High, with its evidence. It is why the level is High."
+
+// NoTriggers states that no trigger fired.
+const NoTriggers = "None fired: no consequence is floored at High, so the level cannot be High."
+
 // Report is what riskelle prints for one scored change.
 type Report struct {
 	Kind  string      `json:"kind"`           // KindScore or KindEstimate
@@ -47,8 +56,10 @@ type Report struct {
 	// The level of the total alone, never above the shape cap; a consequence floor may raise Level above it.
 	ShapeLevel score.Level `json:"shape_level"`
 	// The consequence classes whose floor set Level above ShapeLevel, sorted; [] when none.
-	FlooredBy []string      `json:"floored_by"`
-	Breakdown []score.Point `json:"breakdown"`
+	FlooredBy []string `json:"floored_by"`
+	// The consequences whose floor is High, with their evidence and why, sorted by class; [] when none.
+	Triggers  []score.Trigger `json:"triggers"`
+	Breakdown []score.Point   `json:"breakdown"`
 	// Consequence classes and their floors, sorted by class; [] when none.
 	Consequences []score.Consequence `json:"consequences"`
 	Context      Context             `json:"context"`
@@ -79,8 +90,12 @@ func New(kind string, res score.Result) Report {
 	if flooredBy == nil {
 		flooredBy = []string{}
 	}
+	triggers := res.Triggers
+	if triggers == nil {
+		triggers = []score.Trigger{}
+	}
 	return Report{
-		Kind: kind, Total: res.Total, Level: res.Level, ShapeLevel: res.ShapeLevel, FlooredBy: flooredBy,
+		Kind: kind, Total: res.Total, Level: res.Level, ShapeLevel: res.ShapeLevel, FlooredBy: flooredBy, Triggers: triggers,
 		Breakdown: breakdown, Consequences: consequences,
 		Context: Context{Note: Note, Areas: areas}, Provenance: res.Provenance,
 	}
@@ -136,13 +151,20 @@ func (r Report) Markdown(w io.Writer) error {
 	}
 	b.WriteString("\n</details>\n\n")
 
+	b.WriteString("### " + TriggerHeading + "\n\n")
+	if len(r.Triggers) == 0 {
+		b.WriteString(NoTriggers + "\n\n")
+	} else {
+		b.WriteString(TriggerNote + "\n\n")
+		for _, tr := range r.Triggers {
+			fmt.Fprintf(&b, "- %s, High by %s: paths %s; types %s\n", tr.Class, tr.Why, codes(tr.Paths), types(tr.Types))
+		}
+		b.WriteString("\n")
+	}
+
 	if len(r.Consequences) > 0 {
 		b.WriteString("### " + FloorHeading + "\n\n" + FloorNote + "\n\n")
 		for _, c := range r.Consequences {
-			types := "none (planned)"
-			if len(c.Types) > 0 {
-				types = codes(c.Types)
-			}
 			floor := string(c.Floor)
 			switch len(c.ProductionRoots) {
 			case 0:
@@ -151,7 +173,7 @@ func (r Report) Markdown(w io.Writer) error {
 			default:
 				floor += " (production roots " + codes(c.ProductionRoots) + ")"
 			}
-			fmt.Fprintf(&b, "- %s, floor %s: paths %s; types %s\n", c.Class, floor, codes(c.Paths), types)
+			fmt.Fprintf(&b, "- %s, floor %s: paths %s; types %s\n", c.Class, floor, codes(c.Paths), types(c.Types))
 		}
 		b.WriteString("\n")
 	}
@@ -186,6 +208,15 @@ func counted(p score.Point) string {
 		return "none"
 	}
 	return codes(p.From)
+}
+
+// types renders a consequence's matched types, or "none (planned)" when it
+// has none.
+func types(ts []string) string {
+	if len(ts) == 0 {
+		return "none (planned)"
+	}
+	return codes(ts)
 }
 
 func codes(items []string) string {

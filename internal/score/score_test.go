@@ -1006,3 +1006,98 @@ func TestDeletedFileKeepsFloorsSpreadAndImpact(t *testing.T) {
 		t.Errorf("with a repo class on iam/**: level %s, want High", r.Level)
 	}
 }
+
+// TestTriggers pins the triggers: each consequence whose effective floor is
+// the highest level, sorted by class, with fresh copies of its class, paths
+// and types and why it is that high (its built-in class's own floor, its
+// repo class's own floor, or a production root that raised a lower floor);
+// nil when none. They never change the total or the breakdown.
+func TestTriggers(t *testing.T) {
+	ir := func(paths ...string) facts.Consequence {
+		return facts.Consequence{Class: facts.ConsequenceIdentityRights, Paths: paths, Types: []string{"azurerm_role_assignment"}}
+	}
+	with := func(cs []facts.Consequence, files ...facts.File) facts.Facts {
+		f := levelFacts(0, 2, 0, 0)
+		f.Consequences = cs
+		f.Files = append(f.Files, files...)
+		return f
+	}
+	allow := facts.File{Path: "scripts/guard-allow", Added: 1}
+	rules := func(guard Level, roots ...string) Rules {
+		r := Default()
+		r.ProductionRoots = roots
+		if guard != "" {
+			r.RepoClasses = []RepoClass{{Class: "release_guard", Paths: []string{"scripts/guard-allow"}, Floor: guard}}
+		}
+		return r
+	}
+	highClass := Default()
+	highClass.ConsequenceFloors = []Floor{{facts.ConsequenceIdentityRights, High}, {facts.ConsequencePipelineIdentity, Medium}}
+	noLevels := rules("", "prod/**")
+	noLevels.Levels = nil
+	guardTrigger := func(why string) Trigger {
+		return Trigger{Consequence: facts.Consequence{Class: "release_guard", Paths: []string{"scripts/guard-allow"}, Types: []string{}}, Why: why}
+	}
+	tests := []struct {
+		name string
+		f    facts.Facts
+		r    Rules
+		want []Trigger
+	}{
+		{"no consequence", with(nil), rules("", "prod/**"), nil},
+		{"identity_rights outside every root", with([]facts.Consequence{ir("iam/x.tf")}), rules("", "prod/**"), nil},
+		{"identity_rights under a production root", with([]facts.Consequence{ir("prod/x.tf")}), rules("", "prod/**"),
+			[]Trigger{{Consequence: ir("prod/x.tf"), Why: WhyProductionRoot}}},
+		{"repo class at High", with(nil, allow), rules(High), []Trigger{guardTrigger(WhyRepoClass)}},
+		{"repo class at Medium", with(nil, allow), rules(Medium), nil},
+		{"repo class at Medium under a root", with(nil, allow), rules(Medium, "scripts/**"), []Trigger{guardTrigger(WhyProductionRoot)}},
+		{"repo class at High under a root", with(nil, allow), rules(High, "scripts/**"), []Trigger{guardTrigger(WhyRepoClass)}},
+		{"built-in class floored High", with([]facts.Consequence{ir("iam/x.tf")}), highClass,
+			[]Trigger{{Consequence: ir("iam/x.tf"), Why: WhyClass}}},
+		{"built-in class floored High under a root", with([]facts.Consequence{ir("prod/x.tf")}), func() Rules { r := highClass; r.ProductionRoots = []string{"prod/**"}; return r }(),
+			[]Trigger{{Consequence: ir("prod/x.tf"), Why: WhyClass}}},
+		{"a root trigger and a High repo class, sorted by class", with([]facts.Consequence{ir("prod/x.tf")}, allow), rules(High, "prod/**"),
+			[]Trigger{{Consequence: ir("prod/x.tf"), Why: WhyProductionRoot}, guardTrigger(WhyRepoClass)}},
+		{"no levels", with([]facts.Consequence{ir("prod/x.tf")}), noLevels, nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := Score(tt.f, tt.r)
+			if !reflect.DeepEqual(got.Triggers, tt.want) {
+				t.Errorf("triggers = %+v, want %+v", got.Triggers, tt.want)
+			}
+			// Triggers are exactly the consequences floored at High, in order.
+			var high []facts.Consequence
+			for _, c := range got.Consequences {
+				if c.Floor == High && len(tt.r.Levels) > 0 {
+					high = append(high, c.Consequence)
+				}
+			}
+			var from []facts.Consequence
+			for _, tr := range got.Triggers {
+				from = append(from, tr.Consequence)
+			}
+			if !reflect.DeepEqual(from, high) {
+				t.Errorf("triggers %+v, want the High consequences %+v", from, high)
+			}
+			plain := tt.f
+			plain.Consequences = nil
+			if base := Score(plain, Default()); got.Total != base.Total || !reflect.DeepEqual(got.Breakdown, base.Breakdown) {
+				t.Error("triggers changed the total or breakdown")
+			}
+			js, err := json.Marshal(got)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if has := strings.Contains(string(js), `"triggers"`); has != (len(tt.want) > 0) {
+				t.Errorf("result JSON has a triggers key = %v, want %v: %s", has, len(tt.want) > 0, js)
+			}
+			if len(got.Triggers) > 0 {
+				got.Triggers[0].Paths[0] = "changed"
+				if got.Consequences[0].Paths[0] == "changed" {
+					t.Error("a trigger's paths alias its consequence's")
+				}
+			}
+		})
+	}
+}

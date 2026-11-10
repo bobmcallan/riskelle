@@ -7,6 +7,7 @@
   "floored_by": [
     "identity_rights"
   ],
+  "triggers": [],
   "breakdown": [
     {
       "measure": "size",

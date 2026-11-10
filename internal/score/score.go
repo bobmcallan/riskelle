@@ -51,6 +51,7 @@ type Result struct {
 	Level        Level         `json:"level"`
 	ShapeLevel   Level         `json:"shape_level"`            // the level of the total alone, capped at the rules' shape cap, before any consequence floor
 	FlooredBy    []string      `json:"floored_by,omitempty"`   // when a floor raised Level above ShapeLevel, the classes whose floor set it, sorted; nil otherwise
+	Triggers     []Trigger     `json:"triggers,omitempty"`     // the consequences whose effective floor is the highest level, sorted by class; nil when none
 	Breakdown    []Point       `json:"breakdown"`              // size/lines; spread/files, directories, projects; degree/existing_lines; branch_age/days, trunk_commits; tests/untested_production_files; impact/dependents
 	Consequences []Consequence `json:"consequences,omitempty"` // consequence classes with their floors, sorted by class; nil when none
 	Areas        []Area        `json:"areas,omitempty"`        // sensitive areas the change lands in, sorted by name; reviewer context only, never scored; nil when none
@@ -64,6 +65,20 @@ type Consequence struct {
 	facts.Consequence
 	Floor           Level    `json:"floor"`
 	ProductionRoots []string `json:"production_roots,omitempty"` // in rules order; nil when no root raised the floor
+}
+
+// Why a trigger's floor is the highest level.
+const (
+	WhyClass          = "class"           // the built-in class's own floor is the highest level
+	WhyProductionRoot = "production_root" // a production root raised a lower floor to the highest level
+	WhyRepoClass      = "repo_class"      // the repo class's own floor is the highest level
+)
+
+// Trigger is one consequence whose effective floor is the highest level: its
+// class and evidence (paths and matched types), and why its floor is that high.
+type Trigger struct {
+	facts.Consequence
+	Why string `json:"why"`
 }
 
 // Area is one sensitive area a change lands in and the changed paths that
@@ -112,7 +127,7 @@ func Score(f facts.Facts, r Rules) Result {
 		total += p.Points
 	}
 	total = max(0, min(total, 100))
-	cs := consequences(f, r)
+	cs, triggers := consequences(f, r)
 	shape := capped(level(total, r.Levels), r.ShapeCap, r.Levels)
 	lvl := floored(shape, cs, r.Levels)
 	var by []string
@@ -124,7 +139,7 @@ func Score(f facts.Facts, r Rules) Result {
 		}
 	}
 	return Result{
-		Total: total, Level: lvl, ShapeLevel: shape, FlooredBy: by,
+		Total: total, Level: lvl, ShapeLevel: shape, FlooredBy: by, Triggers: triggers,
 		Breakdown: breakdown, Consequences: cs, Areas: areas(f.Files, r),
 	}
 }
@@ -136,23 +151,29 @@ func Score(f facts.Facts, r Rules) Result {
 // level, so it is reported and raises nothing. A consequence with any path
 // under a production root is floored at the highest level instead, naming
 // those roots. Nil when there are none.
-func consequences(f facts.Facts, r Rules) []Consequence {
+//
+// It also gives the triggers: each consequence whose effective floor is the
+// highest level, in the same order, with fresh copies of its evidence and
+// why: its built-in class's own floor, its repo class's own floor, or a
+// production root that raised a lower floor. Nil when there are none.
+func consequences(f facts.Facts, r Rules) ([]Consequence, []Trigger) {
 	found := append(append([]facts.Consequence{}, f.Consequences...), repoConsequences(f.Files, r.RepoClasses)...)
 	if len(found) == 0 {
-		return nil
+		return nil, nil
 	}
 	sort.SliceStable(found, func(i, j int) bool { return found[i].Class < found[j].Class })
-	lowest := Level("")
+	lowest, top := Level(""), Level("")
 	if len(r.Levels) > 0 {
-		lowest = r.Levels[0].Level
+		lowest, top = r.Levels[0].Level, r.Levels[len(r.Levels)-1].Level
 	}
 	roots := make([]facts.Globs, len(r.ProductionRoots))
 	for i, root := range r.ProductionRoots {
 		roots[i] = facts.CompileGlobs([]string{root})
 	}
 	out := make([]Consequence, 0, len(found))
+	var triggers []Trigger
 	for _, c := range found {
-		floor := lowest
+		floor, why := lowest, WhyClass
 		for _, fl := range r.ConsequenceFloors {
 			if fl.Class == c.Class {
 				floor = fl.Level
@@ -160,7 +181,7 @@ func consequences(f facts.Facts, r Rules) []Consequence {
 		}
 		for _, rc := range r.RepoClasses {
 			if rc.Class == c.Class {
-				floor = rc.Floor
+				floor, why = rc.Floor, WhyRepoClass
 			}
 		}
 		var in []string
@@ -173,7 +194,10 @@ func consequences(f facts.Facts, r Rules) []Consequence {
 			}
 		}
 		if len(in) > 0 && len(r.Levels) > 0 {
-			floor = r.Levels[len(r.Levels)-1].Level
+			if floor != top {
+				why = WhyProductionRoot
+			}
+			floor = top
 		}
 		out = append(out, Consequence{
 			Consequence: facts.Consequence{
@@ -184,8 +208,18 @@ func consequences(f facts.Facts, r Rules) []Consequence {
 			Floor:           floor,
 			ProductionRoots: in,
 		})
+		if len(r.Levels) > 0 && floor == top {
+			triggers = append(triggers, Trigger{
+				Consequence: facts.Consequence{
+					Class: c.Class,
+					Paths: append([]string{}, c.Paths...),
+					Types: append([]string{}, c.Types...),
+				},
+				Why: why,
+			})
+		}
 	}
-	return out
+	return out, triggers
 }
 
 // repoConsequences gives each repo class, in rules order, the changed or
