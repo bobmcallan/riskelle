@@ -202,7 +202,8 @@ func TestReadmeDocumentsReportConsequences(t *testing.T) {
 		s = s[:j]
 	}
 	for _, want := range []string{"`\"consequences\"`", FloorHeading,
-		"`\"shape_level\"`", "`\"floored_by\"`", "splitting the change will not lower it"} {
+		"`\"shape_level\"`", "`\"floored_by\"`", "splitting the change will not lower it",
+		"never exceeds Medium", "High only when a consequence's floor is High"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("README Report section lacks %s", want)
 		}

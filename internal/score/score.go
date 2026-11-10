@@ -49,7 +49,7 @@ type Point struct {
 type Result struct {
 	Total        int           `json:"total"` // 0-100
 	Level        Level         `json:"level"`
-	ShapeLevel   Level         `json:"shape_level"`            // the level of the total alone, before any consequence floor
+	ShapeLevel   Level         `json:"shape_level"`            // the level of the total alone, capped at the rules' shape cap, before any consequence floor
 	FlooredBy    []string      `json:"floored_by,omitempty"`   // when a floor raised Level above ShapeLevel, the classes whose floor set it, sorted; nil otherwise
 	Breakdown    []Point       `json:"breakdown"`              // size/lines; spread/files, directories, projects; degree/existing_lines; branch_age/days, trunk_commits; tests/untested_production_files; impact/dependents
 	Consequences []Consequence `json:"consequences,omitempty"` // consequence classes with their floors, sorted by class; nil when none
@@ -86,8 +86,9 @@ type Provenance struct {
 
 // Score scores the facts of one change against rules. Every breakdown entry is
 // kept, 0 points included, in a fixed order; later measures append theirs.
-// Consequences are read after the total: they never add points and only raise
-// the level to their floor. Areas are reviewer context: they are found after
+// The total's own level is capped at the rules' shape cap; the total and
+// breakdown are not. Consequences are read after the total: they never add
+// points and only raise the level to their floor. Areas are reviewer context: they are found after
 // the total and never add points.
 func Score(f facts.Facts, r Rules) Result {
 	var paths []string
@@ -112,7 +113,7 @@ func Score(f facts.Facts, r Rules) Result {
 	}
 	total = max(0, min(total, 100))
 	cs := consequences(f, r)
-	shape := level(total, r.Levels)
+	shape := capped(level(total, r.Levels), r.ShapeCap, r.Levels)
 	lvl := floored(shape, cs, r.Levels)
 	var by []string
 	if lvl != shape {
@@ -218,20 +219,31 @@ func repoConsequences(files []facts.File, classes []RepoClass) []facts.Consequen
 // floored returns the highest-ranked level among l and each consequence's
 // floor, ranked by position in edges; a level not in edges never raises.
 func floored(l Level, cs []Consequence, edges []LevelEdge) Level {
-	rank := func(x Level) int {
-		for i, e := range edges {
-			if e.Level == x {
-				return i
-			}
-		}
-		return -1
-	}
 	for _, c := range cs {
-		if rank(c.Floor) > rank(l) {
+		if rank(c.Floor, edges) > rank(l, edges) {
 			l = c.Floor
 		}
 	}
 	return l
+}
+
+// capped returns ceiling when l ranks above it in edges, else l; a ceiling not in
+// edges (empty included) caps nothing.
+func capped(l, ceiling Level, edges []LevelEdge) Level {
+	if c := rank(ceiling, edges); c >= 0 && rank(l, edges) > c {
+		return ceiling
+	}
+	return l
+}
+
+// rank is the position of x in edges, or -1 when it is not there.
+func rank(x Level, edges []LevelEdge) int {
+	for i, e := range edges {
+		if e.Level == x {
+			return i
+		}
+	}
+	return -1
 }
 
 // counted splits files into those size, degree and tests count and the paths

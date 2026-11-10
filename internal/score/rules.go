@@ -66,6 +66,12 @@ type Rules struct {
 
 	Levels []LevelEdge `json:"levels"` // ascending, the first at Min 0
 
+	// The highest level the total alone is reported at. A total in a band
+	// above it keeps its points and reports this level; only a consequence
+	// floor raises the level past it. Always set and always hashed;
+	// .risk/rules.json may not set it. A level not in Levels caps nothing.
+	ShapeCap Level `json:"shape_cap"`
+
 	// Built-in floors, one per consequence class, sorted by class. Always set
 	// and always hashed; .risk/rules.json may not set them.
 	ConsequenceFloors []Floor `json:"consequence_floors"`
@@ -115,6 +121,8 @@ func Default() Rules {
 		ImpactDependents: Bands{{0, 0}, {3, 2}, {6, 4}, {11, 7}, {21, 10}},
 
 		Levels: []LevelEdge{{0, Low}, {20, Medium}, {40, High}},
+		// Volume alone is never destructive: High comes only from a floor.
+		ShapeCap: Medium,
 
 		// A consequence raises the level to at least its floor, never the total.
 		ConsequenceFloors: []Floor{{facts.ConsequenceIdentityRights, Medium}, {facts.ConsequencePipelineIdentity, Medium}},

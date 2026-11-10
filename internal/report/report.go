@@ -44,7 +44,7 @@ type Report struct {
 	Head  string      `json:"head,omitempty"` // score only: full SHA the head ref resolved to
 	Total int         `json:"total"`
 	Level score.Level `json:"level"`
-	// The level of the total alone; a consequence floor may raise Level above it.
+	// The level of the total alone, never above the shape cap; a consequence floor may raise Level above it.
 	ShapeLevel score.Level `json:"shape_level"`
 	// The consequence classes whose floor set Level above ShapeLevel, sorted; [] when none.
 	FlooredBy []string      `json:"floored_by"`

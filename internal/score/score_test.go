@@ -153,9 +153,9 @@ func TestTotalLevel(t *testing.T) {
 		{201, 11, 3, 2, 19, Low},   // 10+4+2+3: highest Low
 		{401, 2, 0, 0, 20, Medium}, // lowest Medium
 		{801, 2, 0, 0, 30, Medium},
-		{801, 6, 5, 2, 39, Medium}, // 30+2+4+3: highest Medium
-		{801, 6, 3, 3, 40, High},   // 30+2+2+6: lowest High
-		{801, 16, 9, 3, 50, High},  // every built-in band at its top
+		{801, 6, 5, 2, 39, Medium},  // 30+2+4+3: highest Medium
+		{801, 6, 3, 3, 40, Medium},  // 30+2+2+6: lowest High band, capped at Medium
+		{801, 16, 9, 3, 50, Medium}, // every built-in band at its top, capped at Medium
 	}
 	for _, tt := range tests {
 		f := facts.Facts{Directories: names("d", tt.dirs), Projects: names("p", tt.projects)}
@@ -186,7 +186,7 @@ func TestTotalLevelDegreeAgeTests(t *testing.T) {
 		{26, 8, 10, 18, Low},      // 2+6+0+10
 		{26, 8, 11, 20, Medium},   // 2+6+2+10: one trunk band crosses into Medium
 		{51, 15, 101, 32, Medium}, // size 5 + degree 2 + days 10 + trunk 5 + tests 10
-		{501, 0, 0, 45, High},     // size 20 + degree 15 + tests 10
+		{501, 0, 0, 45, Medium},   // size 20 + degree 15 + tests 10: High band, capped at Medium
 	}
 	for _, tt := range tests {
 		f := facts.Facts{BranchAgeDays: tt.days, TrunkCommits: tt.trunk}
@@ -210,15 +210,15 @@ func TestTotalBounds(t *testing.T) {
 	}
 	// Every built-in band at its top: size and spread 50, degree 15, branch
 	// age 15, tests 10 (the files are existing and untested).
-	if r := Score(sat, Default()); r.Total != 90 || r.Level != High {
-		t.Errorf("saturating facts: total %d level %q, want 90 High", r.Total, r.Level)
+	if r := Score(sat, Default()); r.Total != 90 || r.Level != Medium {
+		t.Errorf("saturating facts: total %d level %q, want 90 Medium", r.Total, r.Level)
 	}
 
 	heavy := Default()
 	heavy.SizeLines = Bands{{0, 80}}
 	heavy.SpreadFiles = Bands{{0, 80}}
-	if r := Score(facts.Facts{}, heavy); r.Total != 100 || r.Level != High {
-		t.Errorf("160 raw points: total %d level %q, want 100 High", r.Total, r.Level)
+	if r := Score(facts.Facts{}, heavy); r.Total != 100 || r.Level != Medium {
+		t.Errorf("160 raw points: total %d level %q, want 100 Medium", r.Total, r.Level)
 	}
 }
 
@@ -562,7 +562,7 @@ func TestConsequenceFloorsLevel(t *testing.T) {
 	}{
 		{"Low total floored to Medium", levelFacts(0, 2, 0, 0), Medium},
 		{"Medium total stays Medium", levelFacts(401, 2, 0, 0), Medium},
-		{"High total stays High", levelFacts(801, 6, 3, 3), High},
+		{"High-band total is capped at Medium", levelFacts(801, 6, 3, 3), Medium},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -586,8 +586,8 @@ func TestConsequenceFloorsLevel(t *testing.T) {
 func TestNoConsequenceScoresAsBefore(t *testing.T) {
 	for _, f := range []facts.Facts{mixed(), levelFacts(201, 11, 3, 2), levelFacts(401, 2, 0, 0), levelFacts(801, 16, 9, 3)} {
 		r := Score(f, Default())
-		if r.Consequences != nil || r.Level != level(r.Total, Default().Levels) {
-			t.Errorf("total %d: level %s consequences %v, want the total's own level and none", r.Total, r.Level, r.Consequences)
+		if r.Consequences != nil || r.Level != r.ShapeLevel {
+			t.Errorf("total %d: level %s shape %s consequences %v, want the shape level and none", r.Total, r.Level, r.ShapeLevel, r.Consequences)
 		}
 		if b, _ := json.Marshal(r); strings.Contains(string(b), `"consequences"`) {
 			t.Errorf("result JSON has a consequences key: %s", b)
@@ -606,32 +606,108 @@ func TestConsequenceWithoutFloor(t *testing.T) {
 	}
 }
 
-// TestReadmeDocumentsFloors pins the README's floor rule against the built-in
-// floors.
-func TestReadmeDocumentsFloors(t *testing.T) {
+// readmeSection returns the body of the README section under heading, up to
+// the next heading of the same or a higher level.
+func readmeSection(t *testing.T, heading string) string {
+	t.Helper()
 	data, err := os.ReadFile("../../README.md")
 	if err != nil {
 		t.Fatal(err)
 	}
-	section := func(heading string) string {
-		s := string(data)
-		i := strings.Index(s, "\n"+heading+"\n")
-		if i < 0 {
-			t.Fatalf("README has no %q section", heading)
-		}
-		s = s[i+len(heading)+2:]
-		level := strings.Repeat("#", strings.Index(heading, " "))
-		for j := 0; j < len(s); j++ {
-			if (j == 0 || s[j-1] == '\n') && strings.HasPrefix(s[j:], "#") {
-				hashes := len(s[j:]) - len(strings.TrimLeft(s[j:], "#"))
-				if hashes <= len(level) {
-					return s[:j]
-				}
+	s := string(data)
+	i := strings.Index(s, "\n"+heading+"\n")
+	if i < 0 {
+		t.Fatalf("README has no %q section", heading)
+	}
+	s = s[i+len(heading)+2:]
+	level := strings.Repeat("#", strings.Index(heading, " "))
+	for j := 0; j < len(s); j++ {
+		if (j == 0 || s[j-1] == '\n') && strings.HasPrefix(s[j:], "#") {
+			hashes := len(s[j:]) - len(strings.TrimLeft(s[j:], "#"))
+			if hashes <= len(level) {
+				return s[:j]
 			}
 		}
-		return s
 	}
-	cons := section("### Consequences")
+	return s
+}
+
+// TestReadmeDocumentsLevels pins the README's level meanings and the shape
+// cap: Intent says what Low, Medium and High mean and that shape caps at
+// Medium; Measures and Rules name the cap.
+func TestReadmeDocumentsLevels(t *testing.T) {
+	for _, tt := range []struct {
+		heading string
+		want    []string
+	}{
+		{"## Intent", []string{"**Low**", "**Medium**", "**High**", "destructive", "A revert does not put it right", "caps at Medium"}},
+		{"## Measures", []string{"caps at Medium", "`shape_cap`", "only a High floor"}},
+		{"## Rules", []string{"`shape_cap`"}},
+	} {
+		sec := readmeSection(t, tt.heading)
+		for _, w := range tt.want {
+			if !strings.Contains(sec, w) {
+				t.Errorf("README %s lacks %q", tt.heading, w)
+			}
+		}
+	}
+}
+
+// TestShapeCap pins AC1: a total in the High band reports shape level and
+// level Medium when no consequence floor is High, with the total and every
+// breakdown entry the same as with no cap; the cap never changes a Low or
+// Medium result; a cap that is not a level caps nothing.
+func TestShapeCap(t *testing.T) {
+	uncapped := Default()
+	uncapped.ShapeCap = ""
+	sat := facts.Facts{Directories: names("d", 20), Projects: names("p", 5), BranchAgeDays: 100, TrunkCommits: 1000}
+	sat.Files = []facts.File{{Path: "big.go", Added: 10000}}
+	for _, p := range names("f", 49) {
+		sat.Files = append(sat.Files, facts.File{Path: p})
+	}
+	high := []struct {
+		name  string
+		f     facts.Facts
+		total int
+	}{
+		{"lowest High band", levelFacts(801, 6, 3, 3), 40},
+		{"every size and spread band at its top", levelFacts(801, 16, 9, 3), 50},
+		{"saturating facts", sat, 90},
+	}
+	for _, tt := range high {
+		t.Run(tt.name, func(t *testing.T) {
+			got := Score(tt.f, Default())
+			raw := Score(tt.f, uncapped)
+			if got.Total != tt.total || raw.Total != tt.total {
+				t.Errorf("total %d (uncapped %d), want %d", got.Total, raw.Total, tt.total)
+			}
+			if got.ShapeLevel != Medium || got.Level != Medium || got.FlooredBy != nil {
+				t.Errorf("capped: shape %s level %s floored_by %v, want Medium Medium nil", got.ShapeLevel, got.Level, got.FlooredBy)
+			}
+			if raw.ShapeLevel != High || raw.Level != High {
+				t.Errorf("uncapped: shape %s level %s, want High High", raw.ShapeLevel, raw.Level)
+			}
+			if !reflect.DeepEqual(got.Breakdown, raw.Breakdown) {
+				t.Errorf("the cap changed the breakdown:\n%+v\nwant\n%+v", got.Breakdown, raw.Breakdown)
+			}
+		})
+	}
+	for _, f := range []facts.Facts{levelFacts(0, 2, 0, 0), levelFacts(401, 2, 0, 0)} {
+		if got, raw := Score(f, Default()), Score(f, uncapped); !reflect.DeepEqual(got, raw) {
+			t.Errorf("the cap changed a Low or Medium result:\n%+v\nwant\n%+v", got, raw)
+		}
+	}
+	notLevel := Default()
+	notLevel.ShapeCap = "Critical"
+	if got := Score(levelFacts(801, 6, 3, 3), notLevel); got.ShapeLevel != High || got.Level != High {
+		t.Errorf("cap Critical: shape %s level %s, want High High", got.ShapeLevel, got.Level)
+	}
+}
+
+// TestReadmeDocumentsFloors pins the README's floor rule against the built-in
+// floors.
+func TestReadmeDocumentsFloors(t *testing.T) {
+	cons := readmeSection(t, "### Consequences")
 	for _, fl := range Default().ConsequenceFloors {
 		for _, want := range []string{"`" + fl.Class + "`", string(fl.Level)} {
 			if !strings.Contains(cons, want) {
@@ -647,7 +723,7 @@ func TestReadmeDocumentsFloors(t *testing.T) {
 	if strings.Contains(cons, "a later release") {
 		t.Error("README Consequences still says a later release sets the floor")
 	}
-	if !strings.Contains(section("## Rules"), "`consequence_floors`") {
+	if !strings.Contains(readmeSection(t, "## Rules"), "`consequence_floors`") {
 		t.Error("README Rules lacks `consequence_floors`")
 	}
 }
@@ -707,9 +783,10 @@ func TestProductionRootsWithoutConsequence(t *testing.T) {
 	}
 }
 
-// TestShapeLevel pins shape_level and floored_by: the shape level is always
-// the total's own level, and floored_by names the classes only when a floor
-// raised the level above it.
+// TestShapeLevel pins shape_level and floored_by: the shape level is the
+// total's own level capped at Medium, so it is never High; only a High floor
+// (a production root or a repo class) makes the level High; floored_by names
+// the classes only when a floor raised the level above the shape level.
 func TestShapeLevel(t *testing.T) {
 	under := func(f facts.Facts) facts.Facts {
 		f.Consequences = []facts.Consequence{{Class: facts.ConsequenceIdentityRights, Paths: []string{"prod-tenant/iam.tf"}}}
@@ -718,6 +795,12 @@ func TestShapeLevel(t *testing.T) {
 	noFloor := Default()
 	noFloor.ConsequenceFloors = nil
 	ir := func(f facts.Facts) facts.Facts { f.Consequences = identityRights; return f }
+	guard := func(f facts.Facts) facts.Facts {
+		f.Files = append(f.Files, facts.File{Path: "scripts/plan-guard-allow", Added: 1})
+		return f
+	}
+	guardRules := Default()
+	guardRules.RepoClasses = []RepoClass{{Class: "release_guard", Paths: []string{"scripts/*guard-allow*"}, Floor: High}}
 	tests := []struct {
 		name      string
 		f         facts.Facts
@@ -729,7 +812,10 @@ func TestShapeLevel(t *testing.T) {
 		{"Low, no consequence", levelFacts(0, 2, 0, 0), Default(), Low, Low, nil},
 		{"Low floored to Medium", ir(levelFacts(0, 2, 0, 0)), Default(), Low, Medium, []string{facts.ConsequenceIdentityRights}},
 		{"Medium at its floor", ir(levelFacts(401, 2, 0, 0)), Default(), Medium, Medium, nil},
-		{"High above its floor", ir(levelFacts(801, 6, 3, 3)), Default(), High, High, nil},
+		{"High band above a Medium floor", ir(levelFacts(801, 6, 3, 3)), Default(), Medium, Medium, nil},
+		{"High band, no consequence", levelFacts(801, 6, 3, 3), Default(), Medium, Medium, nil},
+		{"High band floored High by a production root", under(levelFacts(801, 6, 3, 3)), rootRules(), Medium, High, []string{facts.ConsequenceIdentityRights}},
+		{"High band floored High by a repo class", guard(levelFacts(801, 6, 3, 3)), guardRules, Medium, High, []string{"release_guard"}},
 		{"Low floored High by a production root", under(levelFacts(0, 2, 0, 0)), rootRules(), Low, High, []string{facts.ConsequenceIdentityRights}},
 		{"class with no floor", ir(levelFacts(0, 2, 0, 0)), noFloor, Low, Low, nil},
 	}
@@ -740,8 +826,8 @@ func TestShapeLevel(t *testing.T) {
 				t.Errorf("shape %s, level %s, floored_by %v; want %s, %s, %v",
 					got.ShapeLevel, got.Level, got.FlooredBy, tt.shape, tt.level, tt.flooredBy)
 			}
-			if want := level(got.Total, tt.r.Levels); got.ShapeLevel != want {
-				t.Errorf("shape level %s, want the total's level %s", got.ShapeLevel, want)
+			if got.ShapeLevel == High {
+				t.Errorf("shape level High at total %d, want it never High", got.Total)
 			}
 		})
 	}

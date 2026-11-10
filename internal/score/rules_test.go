@@ -30,3 +30,19 @@ func TestDefaultFloors(t *testing.T) {
 		}
 	}
 }
+
+// TestDefaultShapeCap pins the built-in shape cap: Medium, a level of the
+// scale, below its last edge, which is High.
+func TestDefaultShapeCap(t *testing.T) {
+	r := Default()
+	if r.ShapeCap != Medium {
+		t.Errorf("ShapeCap = %q, want Medium", r.ShapeCap)
+	}
+	if rank(r.ShapeCap, r.Levels) < 0 {
+		t.Errorf("ShapeCap %q is not a level in %v", r.ShapeCap, r.Levels)
+	}
+	last := r.Levels[len(r.Levels)-1].Level
+	if last != High || last == r.ShapeCap {
+		t.Errorf("last edge level %q, want High above the cap %q", last, r.ShapeCap)
+	}
+}

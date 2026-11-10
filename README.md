@@ -32,6 +32,18 @@ of those is in the hands of the person (or agent) making it.
 Low risk is focused development: the smallest change with the lowest impact,
 merged quickly. Many small stories are better than one large one.
 
+The level says what it takes to put a change right if it goes wrong:
+
+- **Low** — small, tested and revertible.
+- **Medium** — risky, but a revert of the merge puts it right.
+- **High** — destructive: hard or impossible to undo, or harm to production,
+  customers, their data or security. A revert does not put it right.
+
+Volume alone is never destructive. The shape of a change (its size, spread,
+degree, impact, branch age and untested files) scores the total in full, but
+its level caps at Medium. High comes only from a consequence whose floor is
+High (see [Consequences](#consequences)).
+
 The score is the fundamental measure for developers. Each developer's KPI is the
 share of their changes that are low risk, so the score must be:
 
@@ -75,10 +87,13 @@ still floors. The facts mark such a file `"deleted": true`, name a Go file's
 package import path in `"package"`, and list the head paths that refer to any
 other deleted file in `"referrers"`.
 
-Each measure scores points in fixed bands; the total is 0–100, reported as Low,
-Medium or High. The band edges are calibrated from real merge history before
-anyone is measured. A consequence (below) can raise the reported level to its
-floor; it never changes the total.
+Each measure scores points in fixed bands; the total is 0–100. The band edges
+are calibrated from real merge history before anyone is measured. The total's
+own level, the shape level, is Low or Medium: it caps at Medium (`shape_cap` in
+the built-in rules), so a total in the High band keeps every point and every
+breakdown entry and reports Medium. A consequence (below) can raise the
+reported level to its floor, and only a High floor makes it High; it never
+changes the total.
 
 Where a change lands (auth, migrations, infrastructure, secrets) is shown on the
 report as context for reviewers, but does not count towards the score: it is the
@@ -92,11 +107,11 @@ catalog, mechanically and the same way every time, and records it in the facts
 as `"consequences"`: the class, the paths that triggered it and the block types
 or pipeline keys that did.
 
-Each class sets a **floor**: the reported level is the higher of the total's
-own level and every consequence's floor. A floor never changes the total or any
+Each class sets a **floor**: the reported level is the higher of the shape
+level (the total's own level, capped at Medium) and every consequence's floor. A floor never changes the total or any
 breakdown entry, so the shape score still rewards small changes, and splitting a
 change cannot lower a floor: the class lands in whichever change carries it.
-The report gives the total's own level as `"shape_level"` beside the level (see
+The report gives the shape level as `"shape_level"` beside the level (see
 Report).
 The floors are built in (`consequence_floors`), recorded in the rules hash on
 every report, and refused by name if `.risk/rules.json` sets them: a repo can
@@ -401,7 +416,9 @@ when none) and, in Markdown, under "Consequences (floor the level)", shown only
 when there is one. A consequence floored by a production root carries
 `"production_roots"`, and its Markdown line reads `floor High (production root
 …)`. Every report also carries `"shape_level"`, the level of the total
-alone, beside `"level"`. When a consequence floor raises the level above it,
+alone, beside `"level"`; it never exceeds Medium, whatever the total.
+`"level"` is High only when a consequence's floor is High. When a consequence
+floor raises the level above the shape level,
 `"floored_by"` names the classes whose floor set it (`[]` otherwise), and the
 Markdown opens with a line stating the shape level, the floor that set the
 level and that splitting the change will not lower it. A flow can route a
@@ -477,7 +494,7 @@ line it leaves for reviewers, is in the skill file itself.
 ## Rules
 
 - **Built in, versioned with each release:** the measures, weights, bands,
-  consequence floors (`consequence_floors`) and default patterns. Changed only by a riskelle release, so the scale is the same
+  consequence floors (`consequence_floors`), the shape cap (`shape_cap`) and default patterns. Changed only by a riskelle release, so the scale is the same
   everywhere.
 - **`.risk/rules.json` in the assessed repo:** settings that can only *add*
   risk or context (extra generated paths for the report, extra sensitive

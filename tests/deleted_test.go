@@ -40,7 +40,8 @@ func deletionFixture(t *testing.T, base map[string]string, rm string) string {
 // deletes legacy/ and nothing else. Every deleted file has 0 dependents, so
 // size, degree and tests are 0 and the total is spread alone: 21 files (8),
 // 12 directories (6), 3 projects (6) = 20, Medium. Counted in full it would
-// be 900 lines (30), 900 existing lines (15) and 18 untested files (10): High.
+// be 900 lines (30), 900 existing lines (15) and 18 untested files (10): the High
+// band, reported Medium.
 func TestDeletedLegacyTreeScoresMedium(t *testing.T) {
 	base := map[string]string{
 		"app/package.json": "{}\n",

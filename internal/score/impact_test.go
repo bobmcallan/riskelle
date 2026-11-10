@@ -125,11 +125,11 @@ func TestImpactInTotal(t *testing.T) {
 		wantTotal                      int
 		want                           Level
 	}{
-		{201, 6, 3, 10, 18, Low},       // 10+2+2+4
-		{201, 6, 3, 11, 21, Medium},    // 10+2+2+7
-		{801, 2, 0, 20, 37, Medium},    // 30+7
-		{801, 2, 0, 21, 40, High},      // 30+10
-		{10000, 16, 9, 1000, 54, High}, // 30+8+6+10, no projects
+		{201, 6, 3, 10, 18, Low},         // 10+2+2+4
+		{201, 6, 3, 11, 21, Medium},      // 10+2+2+7
+		{801, 2, 0, 20, 37, Medium},      // 30+7
+		{801, 2, 0, 21, 40, Medium},      // 30+10: High band, capped at Medium
+		{10000, 16, 9, 1000, 54, Medium}, // 30+8+6+10, no projects: High band, capped at Medium
 	}
 	for _, tt := range tests {
 		f := facts.Facts{Directories: names("d", tt.dirs)}
