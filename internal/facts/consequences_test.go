@@ -189,7 +189,7 @@ func TestIdentityRightsCatalog(t *testing.T) {
 			t.Errorf("attributeConsequencesOf(%q, %q) = %v, want %v", tt.typ, tt.attr, got, tt.want)
 		}
 	}
-	if !IsConsequence(ConsequenceIdentityRights) || !IsConsequence(ConsequencePipelineIdentity) || !IsConsequence(ConsequenceAccessWidened) || IsConsequence("root_access") {
+	if !IsConsequence(ConsequenceIdentityRights) || !IsConsequence(ConsequencePipelineIdentity) || !IsConsequence(ConsequenceAccessWidened) || !IsConsequence(ConsequenceStatefulDestroy) || IsConsequence("root_access") {
 		t.Error("IsConsequence does not match the catalog")
 	}
 }
@@ -233,7 +233,7 @@ func TestReadmeListsConsequences(t *testing.T) {
 	}
 	cons := section("### Consequences")
 	for _, c := range builtinConsequences {
-		names := append(append([]string{c.class}, c.patterns...), c.keys...)
+		names := append(append(append([]string{c.class}, c.patterns...), c.keys...), c.removed...)
 		for typ, attrs := range c.attributes {
 			names = append(names, typ)
 			for _, a := range attrs {
@@ -262,7 +262,7 @@ func TestReadmeListsConsequences(t *testing.T) {
 	if !strings.Contains(cons, "| `access_widened` | High |") || !strings.Contains(cons, "added at head") {
 		t.Error("README Consequences does not give access_widened its High row and rule")
 	}
-	for _, s := range []string{"resource", "data", ".tf"} {
+	for _, s := range []string{"resource", "data", ".tf", "moved", "removed"} {
 		if !strings.Contains(cons, "`"+s+"`") {
 			t.Errorf("README Consequences does not name `%s`", s)
 		}
@@ -327,7 +327,11 @@ func TestTerraformVariables(t *testing.T) {
 	}
 	got := terraformBlocks([]byte(strings.Join(text, "\n")))
 	for i, l := range src {
-		if want := (tfLine{l.block, l.attr, l.variable}); got[i] != want {
+		want := tfLine{block: l.block, attr: l.attr, variable: l.variable}
+		if strings.HasPrefix(l.line, "resource ") {
+			want.address = "azuredevops_check_required_template.r"
+		}
+		if got[i] != want {
 			t.Errorf("line %d %q: %+v, want %+v", i+1, l.line, got[i], want)
 		}
 	}

@@ -105,7 +105,9 @@ A consequence is what a change *does*, read from its changed lines, not where
 it lands. riskelle finds each consequence class in a built-in, versioned
 catalog, mechanically and the same way every time, and records it in the facts
 as `"consequences"`: the class, the paths that triggered it and the block types
-or pipeline keys that did.
+or pipeline keys that did. `stateful_destroy` is read from the resource blocks
+a directory declares at each side, not from changed lines (see
+**Stateful destroy** below).
 
 Each class sets a **floor**: the reported level is the higher of the shape
 level (the total's own level, capped at Medium) and every consequence's floor. A floor never changes the total or any
@@ -143,6 +145,7 @@ or absolute glob are refused by name: a repo class can only raise the level.
 | `access_widened` | High | A line added at head that carries `identity_rights`: a grant added or altered, a variable it uses included; the same paths and types |
 | `identity_rights` | Medium | `aws_iam_*`, `azuread_administrative_unit_member`, `azuread_app_role_assignment`, `azuread_application*`, `azuread_directory_role*`, `azuread_group_member`, `azuread_group_role_management_policy`, `azuread_service_principal*`, `azuredevops_*_permissions`, `azuredevops_branch_policy_*`, `azuredevops_check_*`, `azuredevops_environment*`, `azuredevops_group_membership`, `azuredevops_pipeline_authorization`, `azuredevops_resource_authorization`, `azuredevops_securityrole_assignment`, `azuredevops_serviceendpoint_*`, `azurerm_federated_identity_credential`, `azurerm_role_assignment`, `azurerm_role_definition`, `azurerm_user_assigned_identity`, `github_actions_*_oidc_subject_claim_customization_template`, `github_actions_*_permissions`, `github_actions_environment_*`, `github_branch_protection*`, `github_organization_ruleset`, `github_repository_collaborator*`, `github_repository_environment*`, `github_repository_ruleset`, `github_team_members`, `github_team_membership`, `github_team_repository`, `google_*_iam_*` (Terraform types, globs); `azuread_group` only in its `members` or `owners` attribute, reported as `azuread_group.members` or `azuread_group.owners` |
 | `pipeline_identity` | Medium | Pipeline definitions: keys `*serviceConnection`, `azureSubscription*`, `connectedServiceName*`, `environment` (on a job), `id-token: write`, `permissions: write-all`; in a definition that carries any of these, the references `resources.repositories.ref`, `extends.template`, `stages.template`, `jobs.template`, `steps.template` |
+| `stateful_destroy` | High | A `resource` block removed from its directory, of type: `aws_backup_vault`, `aws_cloudwatch_log_group`, `aws_db_instance`, `aws_docdb_cluster`, `aws_dynamodb_table`, `aws_efs_file_system`, `aws_elasticache_cluster`, `aws_elasticache_replication_group`, `aws_kms_key`, `aws_neptune_cluster`, `aws_opensearch_domain`, `aws_rds_cluster`, `aws_redshift_cluster`, `aws_route53_zone`, `aws_s3_bucket`, `aws_secretsmanager_secret`, `aws_sqs_queue`, `azurerm_cosmosdb_account`, `azurerm_cosmosdb_mongo_collection`, `azurerm_cosmosdb_mongo_database`, `azurerm_cosmosdb_sql_container`, `azurerm_cosmosdb_sql_database`, `azurerm_data_protection_backup_vault`, `azurerm_dns_zone`, `azurerm_eventhub_namespace`, `azurerm_key_vault`, `azurerm_key_vault_certificate`, `azurerm_key_vault_key`, `azurerm_key_vault_secret`, `azurerm_log_analytics_workspace`, `azurerm_mssql_database`, `azurerm_mssql_managed_database`, `azurerm_mssql_managed_instance`, `azurerm_mssql_server`, `azurerm_mysql_flexible_database`, `azurerm_mysql_flexible_server`, `azurerm_postgresql_database`, `azurerm_postgresql_flexible_server`, `azurerm_postgresql_flexible_server_database`, `azurerm_postgresql_server`, `azurerm_private_dns_zone`, `azurerm_recovery_services_vault`, `azurerm_redis_cache`, `azurerm_servicebus_namespace`, `azurerm_storage_account`, `azurerm_storage_container`, `azurerm_storage_data_lake_gen2_filesystem`, `azurerm_storage_share`, `google_backup_dr_backup_vault`, `google_bigquery_dataset`, `google_bigquery_table`, `google_bigtable_instance`, `google_bigtable_table`, `google_dns_managed_zone`, `google_filestore_instance`, `google_firestore_database`, `google_kms_crypto_key`, `google_kms_key_ring`, `google_logging_project_bucket_config`, `google_pubsub_topic`, `google_redis_instance`, `google_secret_manager_secret`, `google_spanner_database`, `google_spanner_instance`, `google_sql_database`, `google_sql_database_instance`, `google_storage_bucket` (exact Terraform types) |
 
 - Delivery rights count as identity and rights: Azure DevOps and GitHub service
   connections and their authorisations, deployment environments and their
@@ -190,6 +193,32 @@ or absolute glob are refused by name: a repo class can only raise the level.
   starts. A file that is not formatted may be misread.
 - A plan has no content, so a planned path names its classes instead (see
   [Plan file](#plan-file)).
+
+**Stateful destroy.** `stateful_destroy` is a stateful resource removed:
+databases and servers, storage accounts, containers, shares and buckets, key
+vaults and their keys, secrets and certificates, DNS zones, caches, message
+namespaces, log workspaces, recovery vaults and KMS keys, across `azurerm`,
+`aws` and `google`, whose destruction loses data a revert does not bring back.
+
+- A `resource` block of a catalogued type carries it when its address
+  `type.name` is declared in a `.tf` file of directory D at the merge base and,
+  at head, no `.tf` file of D declares it, names it as the `from` of a `moved`
+  block, or names it as the `from` of a `removed` block. Only the directories
+  of the merge-base paths of changed `.tf` files are read.
+- The consequence names the merge-base path of the file that declared the
+  block and the resource type, so a production root on a deleted path still
+  floors.
+- Nothing is carried by a block moved to another file of the same directory,
+  a `moved` block whose `from` is the address (a rename), a `removed` block
+  whose `from` is the address, a `data` block, an uncatalogued type, or an
+  edit to the block.
+- Limits: Terraform plan JSON is not read (it is not in git and needs
+  credentials). An in-place replace, a lower `count` or `for_each`, and
+  `prevent_destroy` are not read. A `removed` block exempts the address
+  whatever its `lifecycle` says, `destroy = true` included. A block moved to
+  another directory counts as removed from its own. A `from` naming an
+  instance (`type.name[0]`) or a module address exempts nothing. `.tf.json`
+  files are not read.
 
 **Pipeline definitions.** `pipeline_identity` is what decides which code runs
 as an identity: a CI/CD pipeline that names a service connection or deploys to
@@ -396,7 +425,8 @@ a JSON plan file that predicts the change:
   "consequences": ["identity_rights"]}` or `{"path": "pipelines/release.yml",
   "added": 40, "consequences": ["pipeline_identity"]}`; see
   [Consequences](#consequences). A planned path that adds or alters a grant
-  names both, `"consequences": ["identity_rights", "access_widened"]`. An
+  names both, `"consequences": ["identity_rights", "access_widened"]`. A
+  planned path that removes a stateful resource names `stateful_destroy`. An
   unknown class, or one listed twice for a path, is refused by name. It names
   built-in classes only: a repo class is found from the planned path, by the
   globs in the target's rules, as for a real diff.

@@ -17,6 +17,7 @@ const (
 	ConsequenceAccessWidened    = "access_widened"
 	ConsequenceIdentityRights   = "identity_rights"
 	ConsequencePipelineIdentity = "pipeline_identity"
+	ConsequenceStatefulDestroy  = "stateful_destroy"
 )
 
 // Consequence is one class a change carries, the changed or planned paths
@@ -46,12 +47,18 @@ type Consequence struct {
 // access_widened has no patterns of its own: a line added at head that
 // carries identity_rights (a grant added or altered, a variable it uses
 // included) carries access_widened too, with the same path and type.
+//
+// stateful_destroy is read from the resource blocks a directory declares, not
+// from changed lines: its removed types are the stateful resource types whose
+// block, removed from its directory, destroys data (destroy.go). Exact names:
+// configuration-only types beside them destroy nothing.
 var builtinConsequences = []struct {
 	class      string
 	patterns   []string
 	keys       []string
 	attributes map[string][]string // exact type: the top-level attributes whose lines carry the class
 	widens     string              // the class this one accompanies on a line added at head
+	removed    []string            // resource types whose block removed from its directory carries the class
 }{
 	{class: ConsequenceAccessWidened, widens: ConsequenceIdentityRights},
 	{class: ConsequenceIdentityRights, patterns: []string{
@@ -98,18 +105,42 @@ var builtinConsequences = []struct {
 		// references, only in a definition that carries one of the above
 		"resources.repositories.ref", "extends.template", "stages.template", "jobs.template", "steps.template",
 	}},
+	{class: ConsequenceStatefulDestroy, removed: []string{
+		"aws_backup_vault", "aws_cloudwatch_log_group", "aws_db_instance", "aws_docdb_cluster",
+		"aws_dynamodb_table", "aws_efs_file_system", "aws_elasticache_cluster", "aws_elasticache_replication_group",
+		"aws_kms_key", "aws_neptune_cluster", "aws_opensearch_domain", "aws_rds_cluster",
+		"aws_redshift_cluster", "aws_route53_zone", "aws_s3_bucket", "aws_secretsmanager_secret", "aws_sqs_queue",
+		"azurerm_cosmosdb_account", "azurerm_cosmosdb_mongo_collection", "azurerm_cosmosdb_mongo_database",
+		"azurerm_cosmosdb_sql_container", "azurerm_cosmosdb_sql_database", "azurerm_data_protection_backup_vault",
+		"azurerm_dns_zone", "azurerm_eventhub_namespace", "azurerm_key_vault", "azurerm_key_vault_certificate",
+		"azurerm_key_vault_key", "azurerm_key_vault_secret", "azurerm_log_analytics_workspace",
+		"azurerm_mssql_database", "azurerm_mssql_managed_database", "azurerm_mssql_managed_instance",
+		"azurerm_mssql_server", "azurerm_mysql_flexible_database", "azurerm_mysql_flexible_server",
+		"azurerm_postgresql_database", "azurerm_postgresql_flexible_server",
+		"azurerm_postgresql_flexible_server_database", "azurerm_postgresql_server", "azurerm_private_dns_zone",
+		"azurerm_recovery_services_vault", "azurerm_redis_cache", "azurerm_servicebus_namespace",
+		"azurerm_storage_account", "azurerm_storage_container", "azurerm_storage_data_lake_gen2_filesystem",
+		"azurerm_storage_share",
+		"google_backup_dr_backup_vault", "google_bigquery_dataset", "google_bigquery_table",
+		"google_bigtable_instance", "google_bigtable_table", "google_dns_managed_zone", "google_filestore_instance",
+		"google_firestore_database", "google_kms_crypto_key", "google_kms_key_ring",
+		"google_logging_project_bucket_config", "google_pubsub_topic", "google_redis_instance",
+		"google_secret_manager_secret", "google_spanner_database", "google_spanner_instance",
+		"google_sql_database", "google_sql_database_instance", "google_storage_bucket",
+	}},
 }
 
 type compiledConsequence struct {
-	class string
-	globs Globs
+	class   string
+	globs   Globs
+	removed Globs
 }
 
 // compiledConsequences holds builtinConsequences compiled once.
 var compiledConsequences = func() []compiledConsequence {
 	out := make([]compiledConsequence, 0, len(builtinConsequences))
 	for _, c := range builtinConsequences {
-		out = append(out, compiledConsequence{c.class, CompileGlobs(c.patterns)})
+		out = append(out, compiledConsequence{c.class, CompileGlobs(c.patterns), CompileGlobs(c.removed)})
 	}
 	return out
 }()
@@ -240,7 +271,10 @@ var blockHeader = regexp.MustCompile(`^(?:resource|data)[ \t]+"?([A-Za-z][A-Za-z
 // top-level block it belongs to, and the block's top-level attribute it falls
 // in ("" when none). variable names the column-0 variable "X" block a line
 // belongs to, whose attributes are tracked the same way; "" otherwise.
-type tfLine struct{ block, attr, variable string }
+// address is "type.name" on the header line of a resource block only. gone
+// is "moved" or "removed" on every line of a column-0 moved or removed block,
+// whose attributes are tracked as a variable block's are; "" otherwise.
+type tfLine struct{ block, attr, variable, address, gone string }
 
 // tfAttr matches the identifier that opens a top-level attribute line.
 var tfAttr = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_-]*`)
@@ -265,28 +299,29 @@ var tfAttr = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_-]*`)
 func terraformBlocks(content []byte) []tfLine {
 	lines := strings.Split(string(content), "\n")
 	out := make([]tfLine, len(lines))
-	open, vname, heredoc, attr, col := "", "", "", "", -1
+	open, vname, gone, heredoc, attr, col := "", "", "", "", "", -1
+	line := func(a string) tfLine { return tfLine{block: open, attr: a, variable: vname, gone: gone} }
 	for i, l := range lines {
 		trimmed := strings.TrimLeft(l, " \t")
 		switch {
 		case heredoc != "":
-			out[i] = tfLine{open, attr, vname}
+			out[i] = line(attr)
 			if strings.TrimSpace(l) == heredoc {
 				heredoc = ""
 			}
 			continue
 		case strings.TrimSpace(l) == "" || strings.HasPrefix(l, "#") || strings.HasPrefix(l, "//") || strings.HasPrefix(l, "/*"):
-			out[i] = tfLine{open, "", vname}
+			out[i] = line("")
 		case l[0] == ' ' || l[0] == '\t':
 			indent := len(l) - len(trimmed)
 			if col < 0 {
 				col = indent
 			}
-			tracked := open != "" || vname != ""
+			tracked := open != "" || vname != "" || gone != ""
 			switch {
 			case !tracked || indent > col:
 			case strings.ContainsAny(trimmed[:1], "])}"):
-				out[i] = tfLine{open, attr, vname}
+				out[i] = line(attr)
 				attr = ""
 				continue
 			default:
@@ -295,20 +330,25 @@ func terraformBlocks(content []byte) []tfLine {
 			if !tracked {
 				attr = ""
 			}
-			out[i] = tfLine{open, attr, vname}
+			out[i] = line(attr)
 		case l[0] == '}':
-			out[i] = tfLine{open, "", vname}
-			open, vname, attr, col = "", "", "", -1
+			out[i] = line("")
+			open, vname, gone, attr, col = "", "", "", "", -1
 		default:
-			open, vname, attr, col = "", "", "", -1
+			open, vname, gone, attr, col = "", "", "", "", -1
 			if m := blockHeader.FindStringSubmatch(l); m != nil {
 				open = m[1]
 			} else if m := variableHeader.FindStringSubmatch(l); m != nil {
 				vname = m[1]
+			} else if m := goneHeader.FindStringSubmatch(l); m != nil {
+				gone = m[1]
 			}
-			out[i] = tfLine{open, "", vname}
+			out[i] = line("")
+			if m := resourceHeader.FindStringSubmatch(l); m != nil {
+				out[i].address = m[1] + "." + m[2]
+			}
 			if strings.HasSuffix(strings.TrimRight(l, " \t\r"), "}") {
-				open, vname = "", "" // a one-line block
+				open, vname, gone = "", "", "" // a one-line block
 			}
 		}
 		if m := heredocStart.FindStringSubmatch(l); m != nil {
@@ -368,7 +408,9 @@ func span(start, count string) []int {
 // A class read on a line added at head (an altered line is one removed and
 // one added) also adds each class that widens it, access_widened for
 // identity_rights, with the same path and type; the merge-base side adds
-// none. No other file is read. Nil when there are none.
+// none. A catalogued resource block whose address leaves its directory adds
+// its removal classes, stateful_destroy, with its merge-base path and type
+// (removedBlocks). No other file is read. Nil when there are none.
 func collectConsequences(ctx context.Context, repo, mergeBase, head string, files []File) ([]Consequence, error) {
 	type side struct {
 		path  string
@@ -403,6 +445,15 @@ func collectConsequences(ctx context.Context, repo, mergeBase, head string, file
 	}
 
 	hits := map[string]*struct{ paths, types map[string]bool }{}
+	record := func(class, p, typ string) {
+		h := hits[class]
+		if h == nil {
+			h = &struct{ paths, types map[string]bool }{map[string]bool{}, map[string]bool{}}
+			hits[class] = h
+		}
+		h.paths[p] = true
+		h.types[typ] = true
+	}
 	for _, at := range []struct {
 		commit string
 		sides  []side
@@ -424,15 +475,6 @@ func collectConsequences(ctx context.Context, repo, mergeBase, head string, file
 			if want[b.path] != nil {
 				blobs = append(blobs, b)
 			}
-		}
-		record := func(class, p, typ string) {
-			h := hits[class]
-			if h == nil {
-				h = &struct{ paths, types map[string]bool }{map[string]bool{}, map[string]bool{}}
-				hits[class] = h
-			}
-			h.paths[p] = true
-			h.types[typ] = true
 		}
 		hit := func(class, p, typ string) {
 			record(class, p, typ)
@@ -531,6 +573,9 @@ func collectConsequences(ctx context.Context, repo, mergeBase, head string, file
 		if err != nil {
 			return nil, err
 		}
+	}
+	if err := removedBlocks(ctx, repo, mergeBase, head, files, record); err != nil {
+		return nil, err
 	}
 	if len(hits) == 0 {
 		return nil, nil

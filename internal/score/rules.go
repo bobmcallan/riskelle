@@ -125,7 +125,8 @@ func Default() Rules {
 		ShapeCap: Medium,
 
 		// A consequence raises the level to at least its floor, never the total.
-		// access_widened is the built-in High floor: a grant added or altered.
-		ConsequenceFloors: []Floor{{facts.ConsequenceAccessWidened, High}, {facts.ConsequenceIdentityRights, Medium}, {facts.ConsequencePipelineIdentity, Medium}},
+		// The High floors are destructive: access_widened, a grant added or
+		// altered; stateful_destroy, a stateful resource removed.
+		ConsequenceFloors: []Floor{{facts.ConsequenceAccessWidened, High}, {facts.ConsequenceIdentityRights, Medium}, {facts.ConsequencePipelineIdentity, Medium}, {facts.ConsequenceStatefulDestroy, High}},
 	}
 }
