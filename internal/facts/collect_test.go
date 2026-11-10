@@ -444,12 +444,10 @@ func TestCollectConsequences(t *testing.T) {
 	})
 }
 
-// TestCollectShellShebang collects each changed file's Language: Shell for an
-// extensionless file whose first line at head is a shell shebang, none for a
-// non-shell shebang, no shebang, an extension or a deleted file.
 // TestCollectDefinitionWriteSkipsTests pins that a test file is no script:
-// the same write added to five paths is carried by the one that is not of
-// class test, and by none of the test files beside it.
+// the same update and write added to five paths are carried, each as its own
+// class, by the one that is not of class test, and by none of the test files
+// beside it.
 func TestCollectDefinitionWriteSkipsTests(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not on PATH")
@@ -461,9 +459,10 @@ func TestCollectDefinitionWriteSkipsTests(t *testing.T) {
 	runGit(t, dir, "commit", "--quiet", "-m", "base")
 	runGit(t, dir, "switch", "--quiet", "-c", "feature")
 	const script = "ops/put.sh"
+	content := releasePut + strings.Replace(releasePut, "PUT", "DELETE", 1)
 	tests := []string{"ops/put_test.go", "tests/put.sh", "pkg/testdata/put.sh", "scripts/run-test.sh"}
 	for _, p := range append([]string{script}, tests...) {
-		write(t, dir, p, releasePut)
+		write(t, dir, p, content)
 	}
 	runGit(t, dir, "add", ".")
 	runGit(t, dir, "commit", "--quiet", "-m", "feature")
@@ -476,26 +475,32 @@ func TestCollectDefinitionWriteSkipsTests(t *testing.T) {
 			t.Fatalf("%s is not class test", p)
 		}
 	}
-	set := map[string]bool{}
-	for _, w := range definitionWrites([]byte(releasePut)) {
-		if w != "" {
-			set[w] = true
+	sets := map[string]map[string]bool{ConsequenceDefinitionUpdate: {}, ConsequenceDefinitionWrite: {}}
+	for _, w := range definitionWrites([]byte(content)) {
+		if w.typ != "" {
+			sets[w.class][w.typ] = true
 		}
 	}
-	want := sorted(set)
-	if len(want) == 0 {
-		t.Fatal("the fixture spells no write")
+	var want []Consequence
+	for _, class := range []string{ConsequenceDefinitionUpdate, ConsequenceDefinitionWrite} {
+		if len(sets[class]) == 0 {
+			t.Fatalf("the fixture spells no %s", class)
+		}
+		want = append(want, Consequence{Class: class, Paths: []string{script}, Types: sorted(sets[class])})
 	}
 
 	got, err := Collect(context.Background(), dir, "main", "feature")
 	if err != nil {
 		t.Fatalf("Collect: %v", err)
 	}
-	if c := []Consequence{{Class: ConsequenceDefinitionWrite, Paths: []string{script}, Types: want}}; !reflect.DeepEqual(got.Consequences, c) {
-		t.Errorf("consequences = %+v\nwant %+v", got.Consequences, c)
+	if !reflect.DeepEqual(got.Consequences, want) {
+		t.Errorf("consequences = %+v\nwant %+v", got.Consequences, want)
 	}
 }
 
+// TestCollectShellShebang collects each changed file's Language: Shell for an
+// extensionless file whose first line at head is a shell shebang, none for a
+// non-shell shebang, no shebang, an extension or a deleted file.
 func TestCollectShellShebang(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not on PATH")

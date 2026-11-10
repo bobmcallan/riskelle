@@ -386,7 +386,7 @@ func TestIdentityRightsCatalog(t *testing.T) {
 			t.Errorf("attributeConsequencesOf(%q, %q) = %v, want %v", tt.typ, tt.attr, got, tt.want)
 		}
 	}
-	if !IsConsequence(ConsequenceAccessWidened) || !IsConsequence(ConsequenceDefinitionWrite) ||
+	if !IsConsequence(ConsequenceAccessWidened) || !IsConsequence(ConsequenceDefinitionUpdate) || !IsConsequence(ConsequenceDefinitionWrite) ||
 		!IsConsequence(ConsequenceDestructiveMigration) || !IsConsequence(ConsequenceIdentityRights) ||
 		!IsConsequence(ConsequencePipelineIdentity) || !IsConsequence(ConsequenceProductionDeploy) ||
 		!IsConsequence(ConsequenceSecretAdded) || !IsConsequence(ConsequenceStatefulDestroy) ||
@@ -420,14 +420,16 @@ func TestReadmeDefinitionWritesSkipTests(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	row := ""
-	for _, l := range strings.Split(string(data), "\n") {
-		if strings.HasPrefix(l, "| `definition_write` |") {
-			row = l
+	for _, class := range []string{ConsequenceDefinitionUpdate, ConsequenceDefinitionWrite} {
+		row := ""
+		for _, l := range strings.Split(string(data), "\n") {
+			if strings.HasPrefix(l, "| `"+class+"` |") {
+				row = l
+			}
 		}
-	}
-	if !strings.Contains(row, "but docs and tests (class `test`)") {
-		t.Errorf("README's definition_write row does not leave out tests: %q", row)
+		if !strings.Contains(row, "but docs and tests (class `test`)") {
+			t.Errorf("README's %s row does not leave out tests: %q", class, row)
+		}
 	}
 	s := string(data)
 	i := strings.Index(s, "\n**Definition writes.**")

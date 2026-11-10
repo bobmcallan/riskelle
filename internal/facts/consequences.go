@@ -16,6 +16,7 @@ import (
 // level the change is reported at.
 const (
 	ConsequenceAccessWidened        = "access_widened"
+	ConsequenceDefinitionUpdate     = "definition_update"
 	ConsequenceDefinitionWrite      = "definition_write"
 	ConsequenceDestructiveMigration = "destructive_migration"
 	ConsequenceIdentityRights       = "identity_rights"
@@ -66,8 +67,11 @@ type Consequence struct {
 // either. Identities and what they may do (service connections, permissions,
 // memberships, role assignments) are grants and do.
 //
-// definition_write is a script that writes a release or build definition out
-// of band: reverting the merge does not undo a write already made.
+// definition_update is a script that updates an existing release or build
+// definition out of band, with a PUT or PATCH: the service keeps every
+// revision, so restoring the prior one puts a failed update right.
+// definition_write is every other definition write a script makes: reverting
+// the merge does not undo it, and restoring a revision does not either.
 //
 // production_deploy has no patterns or keys: score reads it from the
 // job environments of a changed pipeline definition (File.Environments) and
@@ -84,7 +88,7 @@ var builtinConsequences = []struct {
 	class      string
 	patterns   []string
 	keys       []string
-	commands   []string            // the command forms a definition_write type starts with
+	commands   []string            // the command forms a definition_update or definition_write type starts with
 	operations []string            // the operation types destructiveOperations reports
 	attributes map[string][]string // exact type: the top-level attributes whose lines carry the class
 	widens     string              // the class this one accompanies on a line added at head
@@ -104,6 +108,9 @@ var builtinConsequences = []struct {
 		"github_organization_ruleset",
 		"github_repository_environment*",
 		"github_repository_ruleset",
+	}},
+	{class: ConsequenceDefinitionUpdate, commands: []string{
+		"az devops invoke", "az pipelines", "az rest", "curl", "Invoke-RestMethod",
 	}},
 	{class: ConsequenceDefinitionWrite, commands: []string{
 		"az devops invoke", "az pipelines", "az pipelines release", "az rest", "curl", "Invoke-RestMethod",
@@ -626,9 +633,10 @@ func filePatch(ctx context.Context, repo, mergeBase, head string, f File) ([]byt
 // collectConsequences finds the consequence classes in the .tf files and
 // pipeline definitions of a change, reading each changed line at head when
 // added and at the merge base when removed. Every changed text file that is
-// neither docs nor a test is also read at head for definition_write: an added line whose
-// logical command (definitionWrites) writes a release or build definition adds
-// the class with the path and the command's type; removed lines carry none. In a .tf file a line takes the
+// neither docs nor a test is also read at head for definition_update and
+// definition_write: an added line whose logical command (definitionWrites)
+// writes a release or build definition adds the command's class with the
+// path and the command's type; removed lines carry none. In a .tf file a line takes the
 // type of the block it sits in, and a catalogued type adds its class with
 // that side's path and the type. In a pipeline definition a line's
 // pipelineIdentity mark adds pipeline_identity with the path and the mark.
@@ -662,7 +670,8 @@ func collectConsequences(ctx context.Context, repo, mergeBase, head string, file
 		file  int // the index in files
 	}
 	var heads, bases []side
-	// scripts are the head paths read for definition_write: neither docs nor tests.
+	// scripts are the head paths read for definition_update and
+	// definition_write: neither docs nor tests.
 	scripts := map[string]bool{}
 	for i, f := range files {
 		script := !f.Binary && !slices.Contains(f.Classes, ClassDocs) && !slices.Contains(f.Classes, ClassTest)
@@ -754,8 +763,8 @@ func collectConsequences(ctx context.Context, repo, mergeBase, head string, file
 			if at.added && scripts[p] {
 				writes := definitionWrites(content)
 				for _, n := range want[p] {
-					if n >= 1 && n <= len(writes) && writes[n-1] != "" {
-						hit(ConsequenceDefinitionWrite, p, writes[n-1], at.added)
+					if n >= 1 && n <= len(writes) && writes[n-1].typ != "" {
+						hit(writes[n-1].class, p, writes[n-1].typ, at.added)
 					}
 				}
 			}

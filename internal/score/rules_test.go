@@ -13,6 +13,7 @@ func TestDefaultFloors(t *testing.T) {
 	d := Default()
 	want := []Floor{
 		{facts.ConsequenceAccessWidened, High},
+		{facts.ConsequenceDefinitionUpdate, Medium},
 		{facts.ConsequenceDefinitionWrite, High},
 		{facts.ConsequenceDestructiveMigration, High},
 		{facts.ConsequenceIdentityRights, Medium},

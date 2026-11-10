@@ -132,6 +132,8 @@ func Default() Rules {
 
 		// A consequence raises the level to at least its floor, never the total.
 		// access_widened is High: a grant added or altered.
+		// definition_update is Medium: the service keeps every revision, so
+		// restoring the prior one puts a failed update right.
 		// definition_write is High: a revert cannot undo a write made out of band.
 		// destructive_migration is High: once a migration runs, the data is gone.
 		// production_deploy is High: a change to a pipeline that deploys to
@@ -141,6 +143,7 @@ func Default() Rules {
 		// stateful_destroy is High: a stateful resource removed.
 		ConsequenceFloors: []Floor{
 			{facts.ConsequenceAccessWidened, High},
+			{facts.ConsequenceDefinitionUpdate, Medium},
 			{facts.ConsequenceDefinitionWrite, High},
 			{facts.ConsequenceDestructiveMigration, High},
 			{facts.ConsequenceIdentityRights, Medium},
