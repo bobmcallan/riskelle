@@ -104,10 +104,10 @@ area's risk, not the developer's (see [Sensitive areas](#sensitive-areas)).
 A consequence is what a change *does*, read from its changed lines, not where
 it lands. riskelle finds each consequence class in a built-in, versioned
 catalog, mechanically and the same way every time, and records it in the facts
-as `"consequences"`: the class, the paths that triggered it and the block types
-or pipeline keys that did. `stateful_destroy` is read from the resource blocks
-a directory declares at each side, not from changed lines (see
-**Stateful destroy** below).
+as `"consequences"`: the class, the paths that triggered it and the block types,
+pipeline keys, commands or destructive operations that did. `stateful_destroy`
+is read from the resource blocks a directory declares at each side, not from
+changed lines (see **Stateful destroy** below).
 
 Each class sets a **floor**: the reported level is the higher of the shape
 level (the total's own level, capped at Medium) and every consequence's floor. A floor never changes the total or any
@@ -143,6 +143,8 @@ or absolute glob are refused by name: a repo class can only raise the level.
 | Class | Floor | Read from |
 | --- | --- | --- |
 | `access_widened` | High | A line added at head that carries `identity_rights`: a grant added or altered, a variable it uses included; the same paths and types |
+| `definition_write` | High | Added lines of any text file but docs: a logical shell command that is `az devops invoke` with `--area release` or `build` and an `--http-method` of `PUT`, `POST`, `PATCH` or `DELETE`; `az pipelines` or `az pipelines release` directly followed by `create`, `update` or `delete`; or `curl`, `az rest` or `Invoke-RestMethod` with a write method against a URL containing `_apis/release/definitions` or `_apis/build/definitions` |
+| `destructive_migration` | High | Added lines of an EF Core migration (`**/Migrations/**/*.cs`): the `migrationBuilder` calls `DeleteData`, `DropColumn`, `DropSchema`, `DropTable`, `RenameColumn`, `RenameTable`; added lines of a migration or a `.sql` file: `DROP TABLE`, `DROP COLUMN`, `DROP SCHEMA`, `DROP DATABASE`, `DROP VIEW`, `TRUNCATE`, `DELETE FROM`, `ALTER TABLE DROP` (`ALTER TABLE ... DROP`) |
 | `identity_rights` | Medium | `aws_iam_*`, `azuread_administrative_unit_member`, `azuread_app_role_assignment`, `azuread_application*`, `azuread_directory_role*`, `azuread_group_member`, `azuread_group_role_management_policy`, `azuread_service_principal*`, `azuredevops_*_permissions`, `azuredevops_branch_policy_*`, `azuredevops_check_*`, `azuredevops_environment*`, `azuredevops_group_membership`, `azuredevops_pipeline_authorization`, `azuredevops_resource_authorization`, `azuredevops_securityrole_assignment`, `azuredevops_serviceendpoint_*`, `azurerm_federated_identity_credential`, `azurerm_role_assignment`, `azurerm_role_definition`, `azurerm_user_assigned_identity`, `github_actions_*_oidc_subject_claim_customization_template`, `github_actions_*_permissions`, `github_actions_environment_*`, `github_branch_protection*`, `github_organization_ruleset`, `github_repository_collaborator*`, `github_repository_environment*`, `github_repository_ruleset`, `github_team_members`, `github_team_membership`, `github_team_repository`, `google_*_iam_*` (Terraform types, globs); `azuread_group` only in its `members` or `owners` attribute, reported as `azuread_group.members` or `azuread_group.owners` |
 | `pipeline_identity` | Medium | Pipeline definitions: keys `*serviceConnection`, `azureSubscription*`, `connectedServiceName*`, `environment` (on a job), `id-token: write`, `permissions: write-all`; in a definition that carries any of these, the references `resources.repositories.ref`, `extends.template`, `stages.template`, `jobs.template`, `steps.template` |
 | `stateful_destroy` | High | A `resource` block removed from its directory, of type: `aws_backup_vault`, `aws_cloudwatch_log_group`, `aws_db_instance`, `aws_docdb_cluster`, `aws_dynamodb_table`, `aws_efs_file_system`, `aws_elasticache_cluster`, `aws_elasticache_replication_group`, `aws_kms_key`, `aws_neptune_cluster`, `aws_opensearch_domain`, `aws_rds_cluster`, `aws_redshift_cluster`, `aws_route53_zone`, `aws_s3_bucket`, `aws_secretsmanager_secret`, `aws_sqs_queue`, `azurerm_cosmosdb_account`, `azurerm_cosmosdb_mongo_collection`, `azurerm_cosmosdb_mongo_database`, `azurerm_cosmosdb_sql_container`, `azurerm_cosmosdb_sql_database`, `azurerm_data_protection_backup_vault`, `azurerm_dns_zone`, `azurerm_eventhub_namespace`, `azurerm_key_vault`, `azurerm_key_vault_certificate`, `azurerm_key_vault_key`, `azurerm_key_vault_secret`, `azurerm_log_analytics_workspace`, `azurerm_mssql_database`, `azurerm_mssql_managed_database`, `azurerm_mssql_managed_instance`, `azurerm_mssql_server`, `azurerm_mysql_flexible_database`, `azurerm_mysql_flexible_server`, `azurerm_postgresql_database`, `azurerm_postgresql_flexible_server`, `azurerm_postgresql_flexible_server_database`, `azurerm_postgresql_server`, `azurerm_private_dns_zone`, `azurerm_recovery_services_vault`, `azurerm_redis_cache`, `azurerm_servicebus_namespace`, `azurerm_storage_account`, `azurerm_storage_container`, `azurerm_storage_data_lake_gen2_filesystem`, `azurerm_storage_share`, `google_backup_dr_backup_vault`, `google_bigquery_dataset`, `google_bigquery_table`, `google_bigtable_instance`, `google_bigtable_table`, `google_dns_managed_zone`, `google_filestore_instance`, `google_firestore_database`, `google_kms_crypto_key`, `google_kms_key_ring`, `google_logging_project_bucket_config`, `google_pubsub_topic`, `google_redis_instance`, `google_secret_manager_secret`, `google_spanner_database`, `google_spanner_instance`, `google_sql_database`, `google_sql_database_instance`, `google_storage_bucket` (exact Terraform types) |
@@ -256,6 +258,66 @@ catalogued key, so it carries nothing.
   (`permissions: { id-token: write }`) and list-form variables
   (`- name: azureSubscription`) are not read, and an Azure `deployment` must be
   its list item's first key.
+
+**Definition writes.** `definition_write` is a script that writes a release or
+build definition out of band, through the Azure DevOps REST API or CLI. It is
+floored at High: reverting the merge does not undo a write the script already
+made.
+
+- Every changed file that is not binary and not docs is read, whatever its
+  extension (a `.sh`, a `.ps1`, a pipeline's inline script). Docs that spell
+  the command carry nothing.
+- Only added lines count, read at head: removing a write command writes
+  nothing. A changed line carries the class when the logical command it
+  belongs to is a write: a line and each following line while the line ends
+  in a backslash, joined. A change to any one continuation line of the
+  command counts; a change to a line beside an unchanged write does not.
+- The command may sit anywhere in the logical line, such as inside `$(...)`.
+  A full-line comment (first non-blank character `#`) carries nothing and
+  ends a continuation; a read of the same definition (a `GET`, or no
+  `--http-method`) carries nothing.
+- The type is the command and its method, such as
+  `az devops invoke --area release --http-method PUT`, `az pipelines update`
+  or `curl PUT _apis/build/definitions`.
+- It is a textual match, not a shell parser: a URL or method held in a
+  variable, `curl`'s implied `POST` (`-d` with no `-X`), PowerShell backtick
+  continuations and a command split across lines without backslashes are not
+  read.
+
+**Destructive migrations.** `destructive_migration` is a change that drops,
+truncates, deletes or renames data: once it runs, the data is gone. Its types
+are the operations matched, as listed above.
+
+- A migration ships to every environment, so the floor is High everywhere: it
+  is not narrowed to production roots, and a root only adds its name.
+- Only added lines are read, at head: an altered line is an added line, and a
+  removed line or a deleted file carries nothing. Removing a destructive
+  statement makes a change safer.
+- An EF Core migration is a `.cs` file under a `Migrations` directory, and a
+  SQL file ends in `.sql` (both case-sensitive). Its `Down` method is not read:
+  `Down` is the rollback, and scaffolding writes a drop there for every
+  additive migration. `Down` runs from its `void Down(` line to the first later
+  line that is only `}` at that line's indent or less; a one-line `Down` (a
+  line ending in `}` or `;`) covers only itself. Code after it, helpers
+  included, is read.
+- A builder call counts on the call's own line, on a parameter named
+  `migrationBuilder` (`migrationBuilder.DropColumn(`), matched case-sensitively.
+  `AddColumn`, `CreateTable`, `DropIndex` and `DropForeignKey` carry nothing.
+- SQL statements count in a `.sql` file and on every read line of a migration
+  (the SQL of `migrationBuilder.Sql(...)` often sits on later lines of a
+  multi-line string), case-insensitively, with the keywords on one line.
+  `TRUNCATE` counts only when not followed by `(`, so `Math.Truncate(x)` and
+  MySQL's `TRUNCATE(x, d)` do not. `ALTER TABLE ... DROP` counts on any line
+  of the statement that carries `DROP`, up to the statement's `;` or a blank
+  line, so `ALTER TABLE t` then `DROP CONSTRAINT c;` counts;
+  `ALTER TABLE t DROP COLUMN c;` reports both `ALTER TABLE DROP` and
+  `DROP COLUMN`.
+- Comments are never read: `/* */` (across lines) and `--` to the end of the
+  line in both kinds of file, and `//` to the end of the line in a migration.
+- It is a line walk, not a C# or SQL parser: quoted text is read as SQL, a
+  comment marker inside a string starts a comment, and a builder under another
+  name is not read. SQL renames (`sp_rename`, `RENAME TO`) and other migration
+  frameworks are not read.
 
 ### Test files
 
@@ -423,7 +485,9 @@ a JSON plan file that predicts the change:
 - `consequences` (optional, per file): the consequence classes the path is
   expected to carry, such as `{"path": "iam/roles.tf", "added": 20,
   "consequences": ["identity_rights"]}` or `{"path": "pipelines/release.yml",
-  "added": 40, "consequences": ["pipeline_identity"]}`; see
+  "added": 40, "consequences": ["pipeline_identity"]}` or
+  `{"path": "db/migrations/002_drop.sql", "added": 3, "consequences":
+  ["destructive_migration"]}`; see
   [Consequences](#consequences). A planned path that adds or alters a grant
   names both, `"consequences": ["identity_rights", "access_widened"]`. A
   planned path that removes a stateful resource names `stateful_destroy`. An

@@ -5,6 +5,7 @@ import (
 	"context"
 	"path"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -14,16 +15,19 @@ import (
 // from its changed lines, not where it lands: a class sets a floor on the
 // level the change is reported at.
 const (
-	ConsequenceAccessWidened    = "access_widened"
-	ConsequenceIdentityRights   = "identity_rights"
-	ConsequencePipelineIdentity = "pipeline_identity"
-	ConsequenceStatefulDestroy  = "stateful_destroy"
+	ConsequenceAccessWidened        = "access_widened"
+	ConsequenceDefinitionWrite      = "definition_write"
+	ConsequenceDestructiveMigration = "destructive_migration"
+	ConsequenceIdentityRights       = "identity_rights"
+	ConsequencePipelineIdentity     = "pipeline_identity"
+	ConsequenceStatefulDestroy      = "stateful_destroy"
 )
 
 // Consequence is one class a change carries, the changed or planned paths
 // that triggered it and the Terraform block types (with ".<attribute>" when
 // an attribute of the block carried it, and " via var.<name>" when a changed
-// variable that the block uses did) or pipeline keys that did. Both lists are sorted,
+// variable that the block uses did), pipeline keys, commands or destructive
+// operations that did. Both lists are sorted,
 // distinct and non-nil; Types is empty for a plan, which has no content.
 // access_widened carries the paths and types of the identity_rights lines
 // added at head that carried it.
@@ -34,8 +38,9 @@ type Consequence struct {
 }
 
 // builtinConsequences is the one catalog of consequence classes: for each, the
-// globs over Terraform resource and data types that carry it, or the pipeline
-// keys that do (pipelines.go). Sorted by class
+// globs over Terraform resource and data types that carry it, the pipeline
+// keys that do (pipelines.go), the command forms that do (definitions.go), or
+// the destructive operations that do (destructive.go). Sorted by class
 // and versioned with each release, beside builtin (classes.go) and
 // builtinAreas (areas.go).
 //
@@ -48,6 +53,9 @@ type Consequence struct {
 // carries identity_rights (a grant added or altered, a variable it uses
 // included) carries access_widened too, with the same path and type.
 //
+// definition_write is a script that writes a release or build definition out
+// of band: reverting the merge does not undo a write already made.
+//
 // stateful_destroy is read from the resource blocks a directory declares, not
 // from changed lines: its removed types are the stateful resource types whose
 // block, removed from its directory, destroys data (destroy.go). Exact names:
@@ -56,11 +64,21 @@ var builtinConsequences = []struct {
 	class      string
 	patterns   []string
 	keys       []string
+	commands   []string            // the command forms a definition_write type starts with
+	operations []string            // the operation types destructiveOperations reports
 	attributes map[string][]string // exact type: the top-level attributes whose lines carry the class
 	widens     string              // the class this one accompanies on a line added at head
 	removed    []string            // resource types whose block removed from its directory carries the class
 }{
 	{class: ConsequenceAccessWidened, widens: ConsequenceIdentityRights},
+	{class: ConsequenceDefinitionWrite, commands: []string{
+		"az devops invoke", "az pipelines", "az pipelines release", "az rest", "curl", "Invoke-RestMethod",
+	}},
+	{class: ConsequenceDestructiveMigration, operations: []string{
+		"DeleteData", "DropColumn", "DropSchema", "DropTable", "RenameColumn", "RenameTable",
+		"ALTER TABLE DROP", "DELETE FROM", "DROP COLUMN", "DROP DATABASE", "DROP SCHEMA",
+		"DROP TABLE", "DROP VIEW", "TRUNCATE",
+	}},
 	{class: ConsequenceIdentityRights, patterns: []string{
 		"aws_iam_*",
 		"azuread_administrative_unit_member",
@@ -397,10 +415,16 @@ func span(start, count string) []int {
 
 // collectConsequences finds the consequence classes in the .tf files and
 // pipeline definitions of a change, reading each changed line at head when
-// added and at the merge base when removed. In a .tf file a line takes the
+// added and at the merge base when removed. Every changed text file that is
+// not docs is also read at head for definition_write: an added line whose
+// logical command (definitionWrites) writes a release or build definition adds
+// the class with the path and the command's type; removed lines carry none. In a .tf file a line takes the
 // type of the block it sits in, and a catalogued type adds its class with
 // that side's path and the type. In a pipeline definition a line's
 // pipelineIdentity mark adds pipeline_identity with the path and the mark.
+// In an EF Core migration or a .sql file only added lines are read, at head:
+// each destructiveOperations operation on one adds destructive_migration with
+// the path and the operation, and the merge base is never read for them.
 // A changed line that sets variable X (an assignment in a .tfvars file, or a
 // line in a variable "X" block's attributes other than description) adds the
 // classes of the catalogued blocks in that directory's .tf files, at the same
@@ -417,8 +441,11 @@ func collectConsequences(ctx context.Context, repo, mergeBase, head string, file
 		lines []int
 	}
 	var heads, bases []side
+	// scripts are the head paths read for definition_write.
+	scripts := map[string]bool{}
 	for _, f := range files {
-		if f.Binary || !(readable(f.Path) || readable(f.OldPath)) {
+		script := !f.Binary && !slices.Contains(f.Classes, ClassDocs)
+		if f.Binary || !(readable(f.Path) || readable(f.OldPath) || script) {
 			continue
 		}
 		args := []string{"--literal-pathspecs", "--attr-source=" + head, "diff", "-U0"}
@@ -436,10 +463,13 @@ func collectConsequences(ctx context.Context, repo, mergeBase, head string, file
 		if f.OldPath != "" {
 			oldPath = f.OldPath
 		}
-		if len(new) > 0 && readable(f.Path) {
+		if len(new) > 0 && (readable(f.Path) || script) {
 			heads = append(heads, side{f.Path, new})
+			if script {
+				scripts[f.Path] = true
+			}
 		}
-		if len(old) > 0 && readable(oldPath) {
+		if len(old) > 0 && readable(oldPath) && !readsDestructive(oldPath) {
 			bases = append(bases, side{oldPath, old})
 		}
 	}
@@ -499,6 +529,28 @@ func collectConsequences(ctx context.Context, repo, mergeBase, head string, file
 		}
 		err = catBlobs(ctx, repo, blobs, func(p string, content []byte) {
 			content = bytes.TrimSuffix(content, []byte("\n"))
+			if at.added && scripts[p] {
+				writes := definitionWrites(content)
+				for _, n := range want[p] {
+					if n >= 1 && n <= len(writes) && writes[n-1] != "" {
+						hit(ConsequenceDefinitionWrite, p, writes[n-1])
+					}
+				}
+			}
+			if readsDestructive(p) {
+				ops := destructiveOperations(p, content)
+				for _, n := range want[p] {
+					if n >= 1 && n <= len(ops) {
+						for _, op := range ops[n-1] {
+							hit(ConsequenceDestructiveMigration, p, op)
+						}
+					}
+				}
+				return
+			}
+			if !readable(p) {
+				return
+			}
 			if isTfvars(p) {
 				names := tfvarsAssignments(content)
 				for _, n := range want[p] {
@@ -595,7 +647,9 @@ func isTerraform(p string) bool { return strings.HasSuffix(p, ".tf") }
 func isTfvars(p string) bool { return strings.HasSuffix(p, ".tfvars") }
 
 // readable reports whether collectConsequences reads a path.
-func readable(p string) bool { return isTerraform(p) || isTfvars(p) || isPipeline(p) }
+func readable(p string) bool {
+	return isTerraform(p) || isTfvars(p) || isPipeline(p) || readsDestructive(p)
+}
 
 // plannedConsequences gives each class a planned path names that path, with
 // no types. Nil when no path names one.

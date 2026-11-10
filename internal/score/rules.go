@@ -125,8 +125,17 @@ func Default() Rules {
 		ShapeCap: Medium,
 
 		// A consequence raises the level to at least its floor, never the total.
-		// The High floors are destructive: access_widened, a grant added or
-		// altered; stateful_destroy, a stateful resource removed.
-		ConsequenceFloors: []Floor{{facts.ConsequenceAccessWidened, High}, {facts.ConsequenceIdentityRights, Medium}, {facts.ConsequencePipelineIdentity, Medium}, {facts.ConsequenceStatefulDestroy, High}},
+		// access_widened is High: a grant added or altered.
+		// definition_write is High: a revert cannot undo a write made out of band.
+		// destructive_migration is High: once a migration runs, the data is gone.
+		// stateful_destroy is High: a stateful resource removed.
+		ConsequenceFloors: []Floor{
+			{facts.ConsequenceAccessWidened, High},
+			{facts.ConsequenceDefinitionWrite, High},
+			{facts.ConsequenceDestructiveMigration, High},
+			{facts.ConsequenceIdentityRights, Medium},
+			{facts.ConsequencePipelineIdentity, Medium},
+			{facts.ConsequenceStatefulDestroy, High},
+		},
 	}
 }

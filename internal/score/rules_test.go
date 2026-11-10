@@ -11,7 +11,15 @@ import (
 // sorted by class, each at a known level.
 func TestDefaultFloors(t *testing.T) {
 	d := Default()
-	if want := []Floor{{facts.ConsequenceAccessWidened, High}, {facts.ConsequenceIdentityRights, Medium}, {facts.ConsequencePipelineIdentity, Medium}, {facts.ConsequenceStatefulDestroy, High}}; !reflect.DeepEqual(d.ConsequenceFloors, want) {
+	want := []Floor{
+		{facts.ConsequenceAccessWidened, High},
+		{facts.ConsequenceDefinitionWrite, High},
+		{facts.ConsequenceDestructiveMigration, High},
+		{facts.ConsequenceIdentityRights, Medium},
+		{facts.ConsequencePipelineIdentity, Medium},
+		{facts.ConsequenceStatefulDestroy, High},
+	}
+	if !reflect.DeepEqual(d.ConsequenceFloors, want) {
 		t.Errorf("floors = %+v, want %+v", d.ConsequenceFloors, want)
 	}
 	for i, fl := range d.ConsequenceFloors {
