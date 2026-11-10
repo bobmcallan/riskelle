@@ -5,6 +5,7 @@ import (
 	"context"
 	"path"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -14,17 +15,22 @@ import (
 // from its changed lines, not where it lands: a class sets a floor on the
 // level the change is reported at.
 const (
-	ConsequenceAccessWidened    = "access_widened"
-	ConsequenceIdentityRights   = "identity_rights"
-	ConsequencePipelineIdentity = "pipeline_identity"
-	ConsequenceSecretAdded      = "secret_added"
+	ConsequenceAccessWidened        = "access_widened"
+	ConsequenceDefinitionWrite      = "definition_write"
+	ConsequenceDestructiveMigration = "destructive_migration"
+	ConsequenceIdentityRights       = "identity_rights"
+	ConsequencePipelineIdentity     = "pipeline_identity"
+	ConsequenceProductionDeploy     = "production_deploy"
+	ConsequenceSecretAdded          = "secret_added"
+	ConsequenceStatefulDestroy      = "stateful_destroy"
 )
 
 // Consequence is one class a change carries, the changed or planned paths
 // that triggered it and the Terraform block types (with ".<attribute>" when
 // an attribute of the block carried it, and " via var.<name>" when a changed
-// variable that the block uses did), pipeline keys or secret rule names that
-// did; a secret's matched text is never kept. Both lists are sorted,
+// variable that the block uses did), pipeline keys, commands, destructive
+// operations or secret rule names that did; a secret's matched text is never
+// kept. Both lists are sorted,
 // distinct and non-nil; Types is empty for a plan, which has no content.
 // access_widened carries the paths and types of the identity_rights lines
 // added at head that carried it.
@@ -35,8 +41,10 @@ type Consequence struct {
 }
 
 // builtinConsequences is the one catalog of consequence classes: for each, the
-// globs over Terraform resource and data types that carry it, or the pipeline
-// keys that do (pipelines.go), or the secret rules that do (secrets.go). Sorted by class
+// globs over Terraform resource and data types that carry it, the pipeline
+// keys that do (pipelines.go), the command forms that do (definitions.go), the
+// destructive operations that do (destructive.go), or the secret rules that do
+// (secrets.go). Sorted by class
 // and versioned with each release, beside builtin (classes.go) and
 // builtinAreas (areas.go).
 //
@@ -49,17 +57,40 @@ type Consequence struct {
 // carries identity_rights (a grant added or altered, a variable it uses
 // included) carries access_widened too, with the same path and type.
 //
+// definition_write is a script that writes a release or build definition out
+// of band: reverting the merge does not undo a write already made.
+//
+// production_deploy has no patterns or keys: score reads it from the
+// job environments of a changed pipeline definition (File.Environments) and
+// the rules' production environment names.
+//
 // secret_added is read from the lines added at head of any text file that
 // match one of its secret rules; the rule's name is the type.
+//
+// stateful_destroy is read from the resource blocks a directory declares, not
+// from changed lines: its removed types are the stateful resource types whose
+// block, removed from its directory, destroys data (destroy.go). Exact names:
+// configuration-only types beside them destroy nothing.
 var builtinConsequences = []struct {
 	class      string
 	patterns   []string
 	keys       []string
+	commands   []string            // the command forms a definition_write type starts with
+	operations []string            // the operation types destructiveOperations reports
 	attributes map[string][]string // exact type: the top-level attributes whose lines carry the class
 	widens     string              // the class this one accompanies on a line added at head
+	removed    []string            // resource types whose block removed from its directory carries the class
 	secrets    []secretRule        // the rules whose match on a line added at head carries the class
 }{
 	{class: ConsequenceAccessWidened, widens: ConsequenceIdentityRights},
+	{class: ConsequenceDefinitionWrite, commands: []string{
+		"az devops invoke", "az pipelines", "az pipelines release", "az rest", "curl", "Invoke-RestMethod",
+	}},
+	{class: ConsequenceDestructiveMigration, operations: []string{
+		"DeleteData", "DropColumn", "DropSchema", "DropTable", "RenameColumn", "RenameTable",
+		"ALTER TABLE DROP", "DELETE FROM", "DROP COLUMN", "DROP DATABASE", "DROP SCHEMA",
+		"DROP TABLE", "DROP VIEW", "TRUNCATE",
+	}},
 	{class: ConsequenceIdentityRights, patterns: []string{
 		"aws_iam_*",
 		"azuread_administrative_unit_member",
@@ -104,19 +135,44 @@ var builtinConsequences = []struct {
 		// references, only in a definition that carries one of the above
 		"resources.repositories.ref", "extends.template", "stages.template", "jobs.template", "steps.template",
 	}},
+	{class: ConsequenceProductionDeploy},
 	{class: ConsequenceSecretAdded, secrets: secretRules},
+	{class: ConsequenceStatefulDestroy, removed: []string{
+		"aws_backup_vault", "aws_cloudwatch_log_group", "aws_db_instance", "aws_docdb_cluster",
+		"aws_dynamodb_table", "aws_efs_file_system", "aws_elasticache_cluster", "aws_elasticache_replication_group",
+		"aws_kms_key", "aws_neptune_cluster", "aws_opensearch_domain", "aws_rds_cluster",
+		"aws_redshift_cluster", "aws_route53_zone", "aws_s3_bucket", "aws_secretsmanager_secret", "aws_sqs_queue",
+		"azurerm_cosmosdb_account", "azurerm_cosmosdb_mongo_collection", "azurerm_cosmosdb_mongo_database",
+		"azurerm_cosmosdb_sql_container", "azurerm_cosmosdb_sql_database", "azurerm_data_protection_backup_vault",
+		"azurerm_dns_zone", "azurerm_eventhub_namespace", "azurerm_key_vault", "azurerm_key_vault_certificate",
+		"azurerm_key_vault_key", "azurerm_key_vault_secret", "azurerm_log_analytics_workspace",
+		"azurerm_mssql_database", "azurerm_mssql_managed_database", "azurerm_mssql_managed_instance",
+		"azurerm_mssql_server", "azurerm_mysql_flexible_database", "azurerm_mysql_flexible_server",
+		"azurerm_postgresql_database", "azurerm_postgresql_flexible_server",
+		"azurerm_postgresql_flexible_server_database", "azurerm_postgresql_server", "azurerm_private_dns_zone",
+		"azurerm_recovery_services_vault", "azurerm_redis_cache", "azurerm_servicebus_namespace",
+		"azurerm_storage_account", "azurerm_storage_container", "azurerm_storage_data_lake_gen2_filesystem",
+		"azurerm_storage_share",
+		"google_backup_dr_backup_vault", "google_bigquery_dataset", "google_bigquery_table",
+		"google_bigtable_instance", "google_bigtable_table", "google_dns_managed_zone", "google_filestore_instance",
+		"google_firestore_database", "google_kms_crypto_key", "google_kms_key_ring",
+		"google_logging_project_bucket_config", "google_pubsub_topic", "google_redis_instance",
+		"google_secret_manager_secret", "google_spanner_database", "google_spanner_instance",
+		"google_sql_database", "google_sql_database_instance", "google_storage_bucket",
+	}},
 }
 
 type compiledConsequence struct {
-	class string
-	globs Globs
+	class   string
+	globs   Globs
+	removed Globs
 }
 
 // compiledConsequences holds builtinConsequences compiled once.
 var compiledConsequences = func() []compiledConsequence {
 	out := make([]compiledConsequence, 0, len(builtinConsequences))
 	for _, c := range builtinConsequences {
-		out = append(out, compiledConsequence{c.class, CompileGlobs(c.patterns)})
+		out = append(out, compiledConsequence{c.class, CompileGlobs(c.patterns), CompileGlobs(c.removed)})
 	}
 	return out
 }()
@@ -247,7 +303,10 @@ var blockHeader = regexp.MustCompile(`^(?:resource|data)[ \t]+"?([A-Za-z][A-Za-z
 // top-level block it belongs to, and the block's top-level attribute it falls
 // in ("" when none). variable names the column-0 variable "X" block a line
 // belongs to, whose attributes are tracked the same way; "" otherwise.
-type tfLine struct{ block, attr, variable string }
+// address is "type.name" on the header line of a resource block only. gone
+// is "moved" or "removed" on every line of a column-0 moved or removed block,
+// whose attributes are tracked as a variable block's are; "" otherwise.
+type tfLine struct{ block, attr, variable, address, gone string }
 
 // tfAttr matches the identifier that opens a top-level attribute line.
 var tfAttr = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_-]*`)
@@ -272,28 +331,29 @@ var tfAttr = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_-]*`)
 func terraformBlocks(content []byte) []tfLine {
 	lines := strings.Split(string(content), "\n")
 	out := make([]tfLine, len(lines))
-	open, vname, heredoc, attr, col := "", "", "", "", -1
+	open, vname, gone, heredoc, attr, col := "", "", "", "", "", -1
+	line := func(a string) tfLine { return tfLine{block: open, attr: a, variable: vname, gone: gone} }
 	for i, l := range lines {
 		trimmed := strings.TrimLeft(l, " \t")
 		switch {
 		case heredoc != "":
-			out[i] = tfLine{open, attr, vname}
+			out[i] = line(attr)
 			if strings.TrimSpace(l) == heredoc {
 				heredoc = ""
 			}
 			continue
 		case strings.TrimSpace(l) == "" || strings.HasPrefix(l, "#") || strings.HasPrefix(l, "//") || strings.HasPrefix(l, "/*"):
-			out[i] = tfLine{open, "", vname}
+			out[i] = line("")
 		case l[0] == ' ' || l[0] == '\t':
 			indent := len(l) - len(trimmed)
 			if col < 0 {
 				col = indent
 			}
-			tracked := open != "" || vname != ""
+			tracked := open != "" || vname != "" || gone != ""
 			switch {
 			case !tracked || indent > col:
 			case strings.ContainsAny(trimmed[:1], "])}"):
-				out[i] = tfLine{open, attr, vname}
+				out[i] = line(attr)
 				attr = ""
 				continue
 			default:
@@ -302,20 +362,25 @@ func terraformBlocks(content []byte) []tfLine {
 			if !tracked {
 				attr = ""
 			}
-			out[i] = tfLine{open, attr, vname}
+			out[i] = line(attr)
 		case l[0] == '}':
-			out[i] = tfLine{open, "", vname}
-			open, vname, attr, col = "", "", "", -1
+			out[i] = line("")
+			open, vname, gone, attr, col = "", "", "", "", -1
 		default:
-			open, vname, attr, col = "", "", "", -1
+			open, vname, gone, attr, col = "", "", "", "", -1
 			if m := blockHeader.FindStringSubmatch(l); m != nil {
 				open = m[1]
 			} else if m := variableHeader.FindStringSubmatch(l); m != nil {
 				vname = m[1]
+			} else if m := goneHeader.FindStringSubmatch(l); m != nil {
+				gone = m[1]
 			}
-			out[i] = tfLine{open, "", vname}
+			out[i] = line("")
+			if m := resourceHeader.FindStringSubmatch(l); m != nil {
+				out[i].address = m[1] + "." + m[2]
+			}
 			if strings.HasSuffix(strings.TrimRight(l, " \t\r"), "}") {
-				open, vname = "", "" // a one-line block
+				open, vname, gone = "", "", "" // a one-line block
 			}
 		}
 		if m := heredocStart.FindStringSubmatch(l); m != nil {
@@ -381,10 +446,16 @@ func changedLines(ctx context.Context, repo, mergeBase, head string, f File) (ol
 
 // collectConsequences finds the consequence classes in the .tf files and
 // pipeline definitions of a change, reading each changed line at head when
-// added and at the merge base when removed. In a .tf file a line takes the
+// added and at the merge base when removed. Every changed text file that is
+// not docs is also read at head for definition_write: an added line whose
+// logical command (definitionWrites) writes a release or build definition adds
+// the class with the path and the command's type; removed lines carry none. In a .tf file a line takes the
 // type of the block it sits in, and a catalogued type adds its class with
 // that side's path and the type. In a pipeline definition a line's
 // pipelineIdentity mark adds pipeline_identity with the path and the mark.
+// In an EF Core migration or a .sql file only added lines are read, at head:
+// each destructiveOperations operation on one adds destructive_migration with
+// the path and the operation, and the merge base is never read for them.
 // A changed line that sets variable X (an assignment in a .tfvars file, or a
 // line in a variable "X" block's attributes other than description) adds the
 // classes of the catalogued blocks in that directory's .tf files, at the same
@@ -392,17 +463,27 @@ func changedLines(ctx context.Context, repo, mergeBase, head string, f File) (ol
 // A class read on a line added at head (an altered line is one removed and
 // one added) also adds each class that widens it, access_widened for
 // identity_rights, with the same path and type; the merge-base side adds
-// none. Every other text file is read only for secret_added: a line added
-// at head that matches a secret rule adds it with the path and the rule name
-// (collectSecrets). Nil when there are none.
+// none. A catalogued resource block whose address leaves its directory adds
+// its removal classes, stateful_destroy, with its merge-base path and type
+// (removedBlocks). Every other text file is read only for secret_added: a
+// line added at head that matches a secret rule adds it with the path and the
+// rule name (collectSecrets). Nil when there are none.
+//
+// It also sets each changed pipeline definition's Environments in files: the
+// job environments it names at each side it has changed lines on (head when
+// lines were added, the merge base when removed), sorted and distinct.
 func collectConsequences(ctx context.Context, repo, mergeBase, head string, files []File) ([]Consequence, error) {
 	type side struct {
 		path  string
 		lines []int
+		file  int // the index in files
 	}
 	var heads, bases []side
-	for _, f := range files {
-		if f.Binary || !(readable(f.Path) || readable(f.OldPath)) {
+	// scripts are the head paths read for definition_write.
+	scripts := map[string]bool{}
+	for i, f := range files {
+		script := !f.Binary && !slices.Contains(f.Classes, ClassDocs)
+		if f.Binary || !(readable(f.Path) || readable(f.OldPath) || script) {
 			continue
 		}
 		old, new, err := changedLines(ctx, repo, mergeBase, head, f)
@@ -413,15 +494,19 @@ func collectConsequences(ctx context.Context, repo, mergeBase, head string, file
 		if f.OldPath != "" {
 			oldPath = f.OldPath
 		}
-		if len(new) > 0 && readable(f.Path) {
-			heads = append(heads, side{f.Path, new})
+		if len(new) > 0 && (readable(f.Path) || script) {
+			heads = append(heads, side{f.Path, new, i})
+			if script {
+				scripts[f.Path] = true
+			}
 		}
-		if len(old) > 0 && readable(oldPath) {
-			bases = append(bases, side{oldPath, old})
+		if len(old) > 0 && readable(oldPath) && !readsDestructive(oldPath) {
+			bases = append(bases, side{oldPath, old, i})
 		}
 	}
 
 	hits := map[string]*struct{ paths, types map[string]bool }{}
+	envs := map[int]map[string]bool{} // job environments by index in files
 	record := func(class, p, typ string) {
 		h := hits[class]
 		if h == nil {
@@ -439,9 +524,9 @@ func collectConsequences(ctx context.Context, repo, mergeBase, head string, file
 		if len(at.sides) == 0 {
 			continue
 		}
-		want := map[string][]int{}
+		want, index := map[string][]int{}, map[string]int{}
 		for _, s := range at.sides {
-			want[s.path] = s.lines
+			want[s.path], index[s.path] = s.lines, s.file
 		}
 		all, err := treeBlobs(ctx, repo, at.commit)
 		if err != nil {
@@ -476,6 +561,28 @@ func collectConsequences(ctx context.Context, repo, mergeBase, head string, file
 		}
 		err = catBlobs(ctx, repo, blobs, func(p string, content []byte) {
 			content = bytes.TrimSuffix(content, []byte("\n"))
+			if at.added && scripts[p] {
+				writes := definitionWrites(content)
+				for _, n := range want[p] {
+					if n >= 1 && n <= len(writes) && writes[n-1] != "" {
+						hit(ConsequenceDefinitionWrite, p, writes[n-1])
+					}
+				}
+			}
+			if readsDestructive(p) {
+				ops := destructiveOperations(p, content)
+				for _, n := range want[p] {
+					if n >= 1 && n <= len(ops) {
+						for _, op := range ops[n-1] {
+							hit(ConsequenceDestructiveMigration, p, op)
+						}
+					}
+				}
+				return
+			}
+			if !readable(p) {
+				return
+			}
 			if isTfvars(p) {
 				names := tfvarsAssignments(content)
 				for _, n := range want[p] {
@@ -486,7 +593,13 @@ func collectConsequences(ctx context.Context, repo, mergeBase, head string, file
 				return
 			}
 			if !isTerraform(p) {
-				marks := pipelineIdentity(content)
+				marks, names := pipelineIdentity(content)
+				for _, name := range names {
+					if envs[index[p]] == nil {
+						envs[index[p]] = map[string]bool{}
+					}
+					envs[index[p]][name] = true
+				}
 				for _, n := range want[p] {
 					if n >= 1 && n <= len(marks) && marks[n-1] != "" {
 						hit(ConsequencePipelineIdentity, p, marks[n-1])
@@ -551,6 +664,12 @@ func collectConsequences(ctx context.Context, repo, mergeBase, head string, file
 			return nil, err
 		}
 	}
+	for i, set := range envs {
+		files[i].Environments = sorted(set)
+	}
+	if err := removedBlocks(ctx, repo, mergeBase, head, files, record); err != nil {
+		return nil, err
+	}
 	if err := collectSecrets(ctx, repo, mergeBase, head, files, record); err != nil {
 		return nil, err
 	}
@@ -572,7 +691,9 @@ func isTerraform(p string) bool { return strings.HasSuffix(p, ".tf") }
 func isTfvars(p string) bool { return strings.HasSuffix(p, ".tfvars") }
 
 // readable reports whether collectConsequences reads a path.
-func readable(p string) bool { return isTerraform(p) || isTfvars(p) || isPipeline(p) }
+func readable(p string) bool {
+	return isTerraform(p) || isTfvars(p) || isPipeline(p) || readsDestructive(p)
+}
 
 // plannedConsequences gives each class a planned path names that path, with
 // no types. Nil when no path names one.

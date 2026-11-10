@@ -11,7 +11,17 @@ import (
 // sorted by class, each at a known level.
 func TestDefaultFloors(t *testing.T) {
 	d := Default()
-	if want := []Floor{{facts.ConsequenceAccessWidened, High}, {facts.ConsequenceIdentityRights, Medium}, {facts.ConsequencePipelineIdentity, Medium}, {facts.ConsequenceSecretAdded, High}}; !reflect.DeepEqual(d.ConsequenceFloors, want) {
+	want := []Floor{
+		{facts.ConsequenceAccessWidened, High},
+		{facts.ConsequenceDefinitionWrite, High},
+		{facts.ConsequenceDestructiveMigration, High},
+		{facts.ConsequenceIdentityRights, Medium},
+		{facts.ConsequencePipelineIdentity, Medium},
+		{facts.ConsequenceProductionDeploy, High},
+		{facts.ConsequenceSecretAdded, High},
+		{facts.ConsequenceStatefulDestroy, High},
+	}
+	if !reflect.DeepEqual(d.ConsequenceFloors, want) {
 		t.Errorf("floors = %+v, want %+v", d.ConsequenceFloors, want)
 	}
 	for i, fl := range d.ConsequenceFloors {
@@ -44,5 +54,18 @@ func TestDefaultShapeCap(t *testing.T) {
 	last := r.Levels[len(r.Levels)-1].Level
 	if last != High || last == r.ShapeCap {
 		t.Errorf("last edge level %q, want High above the cap %q", last, r.ShapeCap)
+	}
+}
+
+// TestDefaultProductionEnvironments pins the built-in production environment
+// names, fresh on each call so no caller can change them.
+func TestDefaultProductionEnvironments(t *testing.T) {
+	d := Default()
+	if want := []string{"prd", "prod", "production"}; !reflect.DeepEqual(d.ProductionEnvironments, want) {
+		t.Errorf("ProductionEnvironments = %q, want %q", d.ProductionEnvironments, want)
+	}
+	d.ProductionEnvironments[0] = "changed"
+	if Default().ProductionEnvironments[0] != "prd" {
+		t.Error("Default shares its production environment names")
 	}
 }

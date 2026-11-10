@@ -1,8 +1,11 @@
 package facts
 
 import (
+	"context"
 	"fmt"
+	"os/exec"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -10,7 +13,8 @@ import (
 // its mark, as "n:mark".
 func marked(content string) []string {
 	var out []string
-	for i, m := range pipelineIdentity([]byte(content)) {
+	marks, _ := pipelineIdentity([]byte(content))
+	for i, m := range marks {
 		if m != "" {
 			out = append(out, fmt.Sprintf("%02d:%s", i+1, m))
 		}
@@ -101,10 +105,10 @@ func TestPipelineIdentity(t *testing.T) {
 			}
 		})
 	}
-	if got := pipelineIdentity([]byte("services:\n  app:\n    environment: x\n")); got != nil {
-		t.Errorf("unsigned content = %v, want nil", got)
+	if got, envs := pipelineIdentity([]byte("services:\n  app:\n    environment: x\n")); got != nil || envs != nil {
+		t.Errorf("unsigned content = %v, %v, want nil", got, envs)
 	}
-	if got := pipelineIdentity([]byte("jobs:\n- deployment: D\n  environment: prod\n")); len(got) != 4 {
+	if got, _ := pipelineIdentity([]byte("jobs:\n- deployment: D\n  environment: prod\n")); len(got) != 4 {
 		t.Errorf("one mark per line: %d for 4 lines", len(got))
 	}
 }
@@ -135,5 +139,135 @@ func TestIsPipeline(t *testing.T) {
 		if got := isPipeline(p); got != want {
 			t.Errorf("isPipeline(%q) = %v, want %v", p, got, want)
 		}
+	}
+}
+
+// TestPipelineEnvironments pins the job environments pipelineIdentity names:
+// a job environment's scalar value or its mapping's name:, as written and in
+// order; none for an environment that is not a job's, a script body or
+// unsigned content.
+func TestPipelineEnvironments(t *testing.T) {
+	for _, tt := range []struct {
+		name, content string
+		want          []string
+	}{
+		{"azure scalar", "jobs:\n- deployment: D\n  environment: prd\n", []string{"prd"}},
+		{"quoted", "jobs:\n- deployment: D\n  environment: 'PRD'\n", []string{"PRD"}},
+		{"trailing comment", "jobs:\n- deployment: D\n  environment: prod # live\n", []string{"prod"}},
+		{"azure mapping", "jobs:\n- deployment: D\n  environment:\n    name: prd-aue\n    resourceType: VirtualMachine\n", []string{"prd-aue"}},
+		{"github scalar", "on: push\njobs:\n  deploy:\n    environment: production\n", []string{"production"}},
+		{"github mapping", "on: push\njobs:\n  deploy:\n    environment:\n      name: Production\n      url: x\n", []string{"Production"}},
+		{"templated", "jobs:\n- deployment: D\n  environment: ${{ parameters.environment }}\n", []string{"${{ parameters.environment }}"}},
+		{"two jobs", "jobs:\n- deployment: A\n  environment: dev\n- deployment: B\n  environment: prd\n", []string{"dev", "prd"}},
+		{"variables environment", "variables:\n  environment: prd\n", nil},
+		{"plain job", "jobs:\n- job: Build\n  environment: prd\n", nil},
+		{"build job variable", "jobs:\n- job: Build\n  variables:\n    environment: prd\n", nil},
+		{"name not under an environment", "jobs:\n- deployment: D\n  pool:\n    name: prd\n  environment: dev\n", []string{"dev"}},
+		{"script body", "steps:\n- script: |\n    environment: prd\n", nil},
+		{"unsigned", "services:\n  app:\n    environment: prd\n", nil},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, got := pipelineIdentity([]byte(tt.content)); !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("environments = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestIsProduction pins the production name rule: a name, ignoring case, or
+// a name followed by a non-letter; never a longer word, a suffix, an empty
+// or templated value, or anything with no names.
+func TestIsProduction(t *testing.T) {
+	builtin := []string{"prd", "prod", "production"}
+	for _, tt := range []struct {
+		env   string
+		names []string
+		want  bool
+	}{
+		{"prd", builtin, true},
+		{"PRD", builtin, true},
+		{"Prod", builtin, true},
+		{"production", builtin, true},
+		{"prd-aue", builtin, true},
+		{"prod_eu", builtin, true},
+		{"production.web", builtin, true},
+		{"prd1", builtin, true},
+		{"dev", builtin, false},
+		{"test", builtin, false},
+		{"product", builtin, false},
+		{"prdx", builtin, false},
+		{"pre-prod", builtin, false},
+		{"nonprod", builtin, false},
+		{"aue-prd", builtin, false},
+		{"", builtin, false},
+		{"${{ parameters.environment }}", builtin, false},
+		{"prd", nil, false},
+		{"-x", []string{""}, false},
+		{"live", append(builtin, "live"), true},
+		{"live-aue", append(builtin, "live"), true},
+		{"lively", append(builtin, "live"), false},
+	} {
+		if got := IsProduction(tt.env, tt.names); got != tt.want {
+			t.Errorf("IsProduction(%q, %q) = %v, want %v", tt.env, tt.names, got, tt.want)
+		}
+	}
+}
+
+// TestCollectEnvironments drives Collect over a fixture repository: a
+// changed definition records the job environments it names at each side it
+// changed on; an unchanged definition and a non-pipeline file record none.
+func TestCollectEnvironments(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	const release = "trigger: none\njobs:\n- deployment: Deploy\n  environment: prd\n  strategy:\n    runOnce:\n" +
+		"      deploy:\n        steps:\n        - script: ./apply.sh\n"
+	const dev = "trigger: none\njobs:\n- deployment: Deploy\n  environment: dev\n  steps:\n  - script: make\n"
+	const compose = "services:\n  app:\n    environment:\n      - MODE=prd\n"
+	for _, tt := range []struct {
+		name  string
+		topic map[string]string
+		want  map[string][]string
+	}{
+		{"script line in a prd definition",
+			map[string]string{"pipelines/release.yml": strings.Replace(release, "./apply.sh", "./apply.sh --plan", 1)},
+			map[string][]string{"pipelines/release.yml": {"prd"}}},
+		{"prd changed to dev",
+			map[string]string{"pipelines/release.yml": strings.Replace(release, "environment: prd", "environment: dev", 1)},
+			map[string][]string{"pipelines/release.yml": {"dev", "prd"}}},
+		{"line added to a dev definition",
+			map[string]string{"pipelines/dev.yml": dev + "  - script: make test\n"},
+			map[string][]string{"pipelines/dev.yml": {"dev"}}},
+		{"compose file", map[string]string{"docker-compose.yml": strings.Replace(compose, "MODE=prd", "MODE=prod", 1)},
+			map[string][]string{"docker-compose.yml": nil}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			runGit(t, dir, "init", "--quiet", "--initial-branch=main")
+			write(t, dir, "pipelines/release.yml", release)
+			write(t, dir, "pipelines/dev.yml", dev)
+			write(t, dir, "docker-compose.yml", compose)
+			write(t, dir, "README.md", "# x\n")
+			runGit(t, dir, "add", ".")
+			runGit(t, dir, "commit", "--quiet", "-m", "base")
+			runGit(t, dir, "switch", "--quiet", "-c", "feature")
+			for p, c := range tt.topic {
+				write(t, dir, p, c)
+			}
+			write(t, dir, "README.md", "# y\n")
+			runGit(t, dir, "commit", "--quiet", "-am", "feature")
+			got, err := Collect(context.Background(), dir, "main", "feature")
+			if err != nil {
+				t.Fatalf("Collect: %v", err)
+			}
+			for _, f := range got.Files {
+				if want := tt.want[f.Path]; !reflect.DeepEqual(f.Environments, want) {
+					t.Errorf("%s: environments = %q, want %q", f.Path, f.Environments, want)
+				}
+			}
+			if len(got.Files) != len(tt.want)+1 {
+				t.Errorf("files = %+v, want %d changed", got.Files, len(tt.want)+1)
+			}
+		})
 	}
 }

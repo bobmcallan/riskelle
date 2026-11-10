@@ -620,6 +620,75 @@ func TestAccessWidenedFloorsHigh(t *testing.T) {
 	}
 }
 
+// TestProductionDeployFloorsHigh pins production_deploy: a changed pipeline
+// definition whose job environment names a production environment in the
+// rules carries it, typed by that environment, floored High whatever its
+// shape, with its total and breakdown untouched; a dev deploy carries none.
+func TestProductionDeployFloorsHigh(t *testing.T) {
+	deploy := func(paths, types []string) Consequence {
+		return Consequence{Consequence: facts.Consequence{Class: facts.ConsequenceProductionDeploy, Paths: paths, Types: types}, Floor: High}
+	}
+	pipeline := facts.Consequence{Class: facts.ConsequencePipelineIdentity, Paths: []string{"pipelines/release.yml"}, Types: []string{"environment"}}
+	live := Default()
+	live.ProductionEnvironments = append(live.ProductionEnvironments, "live")
+	none := Default()
+	none.ProductionEnvironments = nil
+	for _, tt := range []struct {
+		name  string
+		files []facts.File
+		cs    []facts.Consequence
+		rules Rules
+		want  []Consequence
+	}{
+		{"prd", []facts.File{{Path: "pipelines/release.yml", Added: 1, Environments: []string{"prd"}}}, nil, Default(),
+			[]Consequence{deploy([]string{"pipelines/release.yml"}, []string{"prd"})}},
+		{"dev", []facts.File{{Path: "pipelines/release.yml", Added: 1, Environments: []string{"dev"}}}, nil, Default(), nil},
+		{"only the production name", []facts.File{{Path: "pipelines/release.yml", Added: 1, Environments: []string{"PRD-aue", "dev"}}}, nil, Default(),
+			[]Consequence{deploy([]string{"pipelines/release.yml"}, []string{"PRD-aue"})}},
+		{"two files", []facts.File{
+			{Path: "pipelines/z.yml", Added: 1, Environments: []string{"prod"}},
+			{Path: ".github/workflows/deploy.yml", Added: 1, Environments: []string{"Production"}},
+		}, nil, Default(), []Consequence{deploy([]string{".github/workflows/deploy.yml", "pipelines/z.yml"}, []string{"Production", "prod"})}},
+		{"beside pipeline_identity", []facts.File{{Path: "pipelines/release.yml", Added: 1, Environments: []string{"prd"}}},
+			[]facts.Consequence{pipeline}, Default(),
+			[]Consequence{{Consequence: pipeline, Floor: Medium}, deploy([]string{"pipelines/release.yml"}, []string{"prd"})}},
+		{"a name from the rules", []facts.File{{Path: "pipelines/release.yml", Added: 1, Environments: []string{"live"}}}, nil, live,
+			[]Consequence{deploy([]string{"pipelines/release.yml"}, []string{"live"})}},
+		{"no names", []facts.File{{Path: "pipelines/release.yml", Added: 1, Environments: []string{"prd"}}}, nil, none, nil},
+		{"a plan naming the class", []facts.File{{Path: "pipelines/release.yml", Added: 40}},
+			[]facts.Consequence{{Class: facts.ConsequenceProductionDeploy, Paths: []string{"pipelines/release.yml"}, Types: []string{}}}, Default(),
+			[]Consequence{deploy([]string{"pipelines/release.yml"}, []string{})}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			f := facts.Facts{Files: tt.files, Directories: []string{"pipelines"}, Consequences: tt.cs}
+			got := Score(f, tt.rules)
+			if !reflect.DeepEqual(got.Consequences, tt.want) {
+				t.Errorf("consequences = %+v, want %+v", got.Consequences, tt.want)
+			}
+			bare := Score(facts.Facts{Files: tt.files, Directories: []string{"pipelines"}}, none)
+			if got.Total != bare.Total || !reflect.DeepEqual(got.Breakdown, bare.Breakdown) {
+				t.Errorf("a floor changed the total or breakdown: %d vs %d", got.Total, bare.Total)
+			}
+			wantLevel, wantBy := got.ShapeLevel, []string(nil)
+			var wantT []Trigger
+			for _, c := range tt.want {
+				if c.Class == facts.ConsequenceProductionDeploy {
+					wantLevel, wantBy = High, []string{facts.ConsequenceProductionDeploy}
+					wantT = []Trigger{{Consequence: c.Consequence, Why: WhyClass}}
+				} else if wantLevel != High {
+					wantLevel, wantBy = Medium, []string{c.Class}
+				}
+			}
+			if got.Level != wantLevel || !reflect.DeepEqual(got.FlooredBy, wantBy) || !reflect.DeepEqual(got.Triggers, wantT) {
+				t.Errorf("level %s floored_by %v triggers %+v, want %s %v %+v", got.Level, got.FlooredBy, got.Triggers, wantLevel, wantBy, wantT)
+			}
+			if got.ShapeLevel != Low {
+				t.Errorf("shape %s, want Low", got.ShapeLevel)
+			}
+		})
+	}
+}
+
 func TestNoConsequenceScoresAsBefore(t *testing.T) {
 	for _, f := range []facts.Facts{mixed(), levelFacts(201, 11, 3, 2), levelFacts(401, 2, 0, 0), levelFacts(801, 16, 9, 3)} {
 		r := Score(f, Default())
@@ -750,6 +819,11 @@ func TestReadmeDocumentsFloors(t *testing.T) {
 			if !strings.Contains(cons, want) {
 				t.Errorf("README Consequences lacks %s", want)
 			}
+		}
+	}
+	for _, name := range Default().ProductionEnvironments {
+		if !strings.Contains(cons, "`"+name+"`") {
+			t.Errorf("README Consequences lacks production environment `%s`", name)
 		}
 	}
 	for _, want := range []string{"floor", "rules hash", "refused", "never changes the total"} {

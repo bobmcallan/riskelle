@@ -3,6 +3,8 @@ package facts
 import (
 	"regexp"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 )
 
 // pipelineDefinitions are the paths a CI/CD pipeline definition lives at:
@@ -54,6 +56,7 @@ var blockScalar = regexp.MustCompile(`^[|>][-+0-9]*$`)
 type yamlFrame struct {
 	col             int
 	key, item, mark string
+	env             bool // the frame is a job's environment key
 }
 
 // pipelineIdentity returns, for each line of content (index 0 is line 1),
@@ -69,7 +72,12 @@ type yamlFrame struct {
 // A reference to the code a pipeline runs (reference) carries its key path as
 // its mark only when some line of content carries a mark: a definition that
 // runs as no identity is unchanged by where its code comes from.
-func pipelineIdentity(content []byte) []string {
+//
+// It also returns the job environments content names, as written and in
+// order of appearance: a job environment's scalar value, or the value of
+// name: directly under a mapping-form job environment; a block scalar names
+// none. Nil when none, and nil for unsigned content.
+func pipelineIdentity(content []byte) (marks, environments []string) {
 	lines := strings.Split(string(content), "\n")
 	signed := false
 	for _, l := range lines {
@@ -80,7 +88,7 @@ func pipelineIdentity(content []byte) []string {
 		}
 	}
 	if !signed {
-		return nil
+		return nil, nil
 	}
 	out := make([]string, len(lines))
 	refs := make([]string, len(lines))
@@ -141,7 +149,11 @@ func pipelineIdentity(content []byte) []string {
 			item = strings.ToLower(key)
 		}
 		lower := strings.ToLower(key)
-		mark := ""
+		if lower == "name" && m[2] == "" && value != "" && !blockScalar.MatchString(value) &&
+			len(stack) > 0 && stack[len(stack)-1].env {
+			environments = append(environments, value)
+		}
+		mark, job := "", false
 		switch {
 		case connectionKeys.Match(lower):
 			mark = key
@@ -151,13 +163,16 @@ func pipelineIdentity(content []byte) []string {
 			mark = "permissions: write-all"
 		case lower == "environment" && (item == "deployment" ||
 			len(stack) == 2 && stack[0].key == "jobs" && stack[0].col == 0 && stack[1].item == ""):
-			mark = "environment"
+			mark, job = "environment", true
+			if value != "" && !blockScalar.MatchString(value) {
+				environments = append(environments, value)
+			}
 		}
 		if mark == "" {
 			mark = top()
 		}
 		refs[i] = reference(lower, item, stack)
-		stack = append(stack, yamlFrame{col, lower, item, mark})
+		stack = append(stack, yamlFrame{col, lower, item, mark, job})
 		out[i] = mark
 		if blockScalar.MatchString(value) {
 			scalar = col
@@ -173,7 +188,29 @@ func pipelineIdentity(content []byte) []string {
 			break
 		}
 	}
-	return out
+	return out, environments
+}
+
+// IsProduction reports whether a job environment, as written, names a
+// production environment in names: ignoring case, it equals a name, or starts
+// with one and the next character is not a letter (prd-aue, prod_eu,
+// production.web, prd1, but not product or prdx). An empty name matches
+// nothing.
+func IsProduction(env string, names []string) bool {
+	env = strings.ToLower(env)
+	for _, n := range names {
+		n = strings.ToLower(n)
+		if n == "" || !strings.HasPrefix(env, n) {
+			continue
+		}
+		if len(env) == len(n) {
+			return true
+		}
+		if r, _ := utf8.DecodeRuneInString(env[len(n):]); !unicode.IsLetter(r) {
+			return true
+		}
+	}
+	return false
 }
 
 // reference returns the key path of a key line that references the code a
