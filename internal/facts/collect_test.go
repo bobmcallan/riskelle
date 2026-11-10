@@ -342,7 +342,9 @@ func TestCollectTestLanguages(t *testing.T) {
 
 // TestCollectConsequences collects identity_rights from a real diff: a
 // catalogued block altered, one added as a data block and one removed, and
-// nothing from an uncatalogued block or a mention in another file.
+// nothing from an uncatalogued block or a mention in another file. A line
+// added at head also carries access_widened with the same path and type; a
+// change of removed lines only carries identity_rights alone.
 func TestCollectConsequences(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not on PATH")
@@ -374,6 +376,10 @@ func TestCollectConsequences(t *testing.T) {
 			t.Fatalf("Collect: %v", err)
 		}
 		want := []Consequence{{
+			Class: ConsequenceAccessWidened,
+			Paths: []string{"iam/main.tf", "iam/sp.tf"},
+			Types: []string{"azuread_service_principal", "azurerm_role_assignment"},
+		}, {
 			Class: ConsequenceIdentityRights,
 			Paths: []string{"iam/main.tf", "iam/old.tf", "iam/sp.tf"},
 			Types: []string{"aws_iam_role", "azuread_service_principal", "azurerm_role_assignment"},
@@ -391,8 +397,31 @@ func TestCollectConsequences(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Collect: %v", err)
 		}
-		if len(got.Consequences) != 1 || !reflect.DeepEqual(got.Consequences[0].Types, []string{"aws_iam_role"}) {
-			t.Errorf("Consequences = %+v, want aws_iam_role", got.Consequences)
+		want := []Consequence{
+			{Class: ConsequenceAccessWidened, Paths: []string{"iam/old.tf"}, Types: []string{"aws_iam_role"}},
+			{Class: ConsequenceIdentityRights, Paths: []string{"iam/old.tf"}, Types: []string{"aws_iam_role"}},
+		}
+		if !reflect.DeepEqual(got.Consequences, want) {
+			t.Errorf("Consequences = %+v, want %+v", got.Consequences, want)
+		}
+	})
+
+	t.Run("removed only", func(t *testing.T) {
+		dir := fixture(t)
+		write(t, dir, "iam/main.tf", storage)
+		write(t, dir, "iam/old.tf", "locals {\n  a = 1\n}\n")
+		runGit(t, dir, "commit", "--quiet", "-am", "feature")
+		got, err := Collect(context.Background(), dir, "main", "feature")
+		if err != nil {
+			t.Fatalf("Collect: %v", err)
+		}
+		want := []Consequence{{
+			Class: ConsequenceIdentityRights,
+			Paths: []string{"iam/main.tf", "iam/old.tf"},
+			Types: []string{"aws_iam_role", "azurerm_role_assignment"},
+		}}
+		if !reflect.DeepEqual(got.Consequences, want) {
+			t.Errorf("Consequences = %+v, want %+v", got.Consequences, want)
 		}
 	})
 

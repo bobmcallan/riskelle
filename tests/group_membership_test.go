@@ -70,8 +70,9 @@ resource "azuread_group" "platform_readers" {
 // modelled on real ones: a group member, a group role management policy and
 // an administrative unit member are identity_rights whether added, altered
 // or removed; an azuread_group carries it only when a changed line falls in
-// its members or owners; a new group with members from data.azuread_users,
-// Low by shape, is reported Medium.
+// its members or owners. An added or altered line also carries access_widened
+// and is High; a removed one carries identity_rights alone and stays Medium.
+// A new group with members from data.azuread_users, Low by shape, is High.
 func TestGroupMembershipFloorsTheLevel(t *testing.T) {
 	bin := buildRiskelle(t, t.TempDir())
 	run := func(t *testing.T, dir string) (report.Report, string) {
@@ -82,11 +83,15 @@ func TestGroupMembershipFloorsTheLevel(t *testing.T) {
 		}
 		return decodeReport(t, out), out
 	}
-	medium := func(t *testing.T, r report.Report, path, types string) {
+	carries := func(t *testing.T, r report.Report, level score.Level, path, types string) {
 		t.Helper()
-		want := `[{"class":"identity_rights","paths":["` + path + `"],"types":` + types + `,"floor":"Medium"}]`
-		if b, _ := json.Marshal(r.Consequences); r.Level != score.Medium || string(b) != want {
-			t.Errorf("level %s consequences = %s\nwant Medium %s", r.Level, b, want)
+		want := `{"class":"identity_rights","paths":["` + path + `"],"types":` + types + `,"floor":"Medium"}`
+		if level == score.High {
+			want = `{"class":"access_widened","paths":["` + path + `"],"types":` + types + `,"floor":"High"},` + want
+		}
+		want = "[" + want + "]"
+		if b, _ := json.Marshal(r.Consequences); r.Level != level || string(b) != want {
+			t.Errorf("level %s consequences = %s\nwant %s %s", r.Level, b, level, want)
 		}
 	}
 	base := map[string]string{"identity/main.tf": rgTF}
@@ -95,36 +100,36 @@ func TestGroupMembershipFloorsTheLevel(t *testing.T) {
 
 	t.Run("member, role management policy and administrative unit member added", func(t *testing.T) {
 		got, _ := run(t, rulesFixture(t, base, map[string]string{"identity/membership.tf": membershipTF}))
-		medium(t, got, "identity/membership.tf",
+		carries(t, got, score.High, "identity/membership.tf",
 			`["azuread_administrative_unit_member","azuread_group_member","azuread_group_role_management_policy"]`)
 	})
 	t.Run("administrative unit member altered", func(t *testing.T) {
 		alt := strings.Replace(membershipTF, "member_object_id              = data.azuread_user.u.object_id",
 			"member_object_id              = data.azuread_user.v.object_id", 1)
 		got, _ := run(t, rulesFixture(t, withMembership, map[string]string{"identity/membership.tf": alt}))
-		medium(t, got, "identity/membership.tf", `["azuread_administrative_unit_member"]`)
+		carries(t, got, score.High, "identity/membership.tf", `["azuread_administrative_unit_member"]`)
 	})
 	t.Run("group member block removed", func(t *testing.T) {
 		i := strings.Index(membershipTF, `resource "azuread_group_role_management_policy"`)
 		got, _ := run(t, rulesFixture(t, withMembership, map[string]string{"identity/membership.tf": membershipTF[i:]}))
-		medium(t, got, "identity/membership.tf", `["azuread_group_member"]`)
+		carries(t, got, score.Medium, "identity/membership.tf", `["azuread_group_member"]`)
 	})
 
 	t.Run("member added to a multi-line list", func(t *testing.T) {
 		alt := strings.Replace(groupsTF, "    \"00000000-0000-0000-0000-000000000002\",\n",
 			"    \"00000000-0000-0000-0000-000000000002\",\n    \"00000000-0000-0000-0000-000000000003\",\n", 1)
 		got, _ := run(t, rulesFixture(t, withGroups, map[string]string{"identity/groups.tf": alt}))
-		medium(t, got, "identity/groups.tf", `["azuread_group.members"]`)
+		carries(t, got, score.High, "identity/groups.tf", `["azuread_group.members"]`)
 	})
 	t.Run("owners altered", func(t *testing.T) {
 		alt := strings.Replace(groupsTF, "000000000009", "000000000008", 1)
 		got, _ := run(t, rulesFixture(t, withGroups, map[string]string{"identity/groups.tf": alt}))
-		medium(t, got, "identity/groups.tf", `["azuread_group.owners"]`)
+		carries(t, got, score.High, "identity/groups.tf", `["azuread_group.owners"]`)
 	})
 	t.Run("member removed", func(t *testing.T) {
 		alt := strings.Replace(groupsTF, "    \"00000000-0000-0000-0000-000000000001\",\n", "", 1)
 		got, _ := run(t, rulesFixture(t, withGroups, map[string]string{"identity/groups.tf": alt}))
-		medium(t, got, "identity/groups.tf", `["azuread_group.members"]`)
+		carries(t, got, score.Medium, "identity/groups.tf", `["azuread_group.members"]`)
 	})
 	t.Run("description and display_name only", func(t *testing.T) {
 		alt := strings.Replace(strings.Replace(groupsTF, "Platform team", "Platform engineering", 1), `"platform"`, `"platform-eng"`, 1)
@@ -143,6 +148,6 @@ func TestGroupMembershipFloorsTheLevel(t *testing.T) {
 		if got.Total >= 20 || got.Total != n || got.ShapeLevel != score.Low {
 			t.Errorf("total %d (sum %d) shape %s, want a Low total equal to the sum", got.Total, n, got.ShapeLevel)
 		}
-		medium(t, got, "identity/groups.tf", `["azuread_group.members"]`)
+		carries(t, got, score.High, "identity/groups.tf", `["azuread_group.members"]`)
 	})
 }

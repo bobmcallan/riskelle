@@ -15,6 +15,7 @@ import (
 // from its changed lines, not where it lands: a class sets a floor on the
 // level the change is reported at.
 const (
+	ConsequenceAccessWidened    = "access_widened"
 	ConsequenceDefinitionWrite  = "definition_write"
 	ConsequenceIdentityRights   = "identity_rights"
 	ConsequencePipelineIdentity = "pipeline_identity"
@@ -25,6 +26,8 @@ const (
 // an attribute of the block carried it, and " via var.<name>" when a changed
 // variable that the block uses did), pipeline keys or commands that did. Both lists are sorted,
 // distinct and non-nil; Types is empty for a plan, which has no content.
+// access_widened carries the paths and types of the identity_rights lines
+// added at head that carried it.
 type Consequence struct {
 	Class string   `json:"class"`
 	Paths []string `json:"paths"`
@@ -43,6 +46,10 @@ type Consequence struct {
 // and protections, and permissions decide who can act as a deploy identity,
 // as a federated credential does. Generic secret and variable stores do not.
 //
+// access_widened has no patterns of its own: a line added at head that
+// carries identity_rights (a grant added or altered, a variable it uses
+// included) carries access_widened too, with the same path and type.
+//
 // definition_write is a script that writes a release or build definition out
 // of band: reverting the merge does not undo a write already made.
 var builtinConsequences = []struct {
@@ -51,7 +58,9 @@ var builtinConsequences = []struct {
 	keys       []string
 	commands   []string            // the command forms a definition_write type starts with
 	attributes map[string][]string // exact type: the top-level attributes whose lines carry the class
+	widens     string              // the class this one accompanies on a line added at head
 }{
+	{class: ConsequenceAccessWidened, widens: ConsequenceIdentityRights},
 	{class: ConsequenceDefinitionWrite, commands: []string{
 		"az devops invoke", "az pipelines", "az pipelines release", "az rest", "curl", "Invoke-RestMethod",
 	}},
@@ -123,6 +132,18 @@ func IsConsequence(class string) bool {
 		}
 	}
 	return false
+}
+
+// widenedBy returns the catalog classes that accompany class on a line added
+// at head, in catalog order; nil when none do.
+func widenedBy(class string) []string {
+	var out []string
+	for _, c := range builtinConsequences {
+		if c.widens != "" && c.widens == class {
+			out = append(out, c.class)
+		}
+	}
+	return out
 }
 
 // attributeConsequencesOf returns the classes a line in attr of a block of
@@ -357,7 +378,10 @@ func span(start, count string) []int {
 // line in a variable "X" block's attributes other than description) adds the
 // classes of the catalogued blocks in that directory's .tf files, at the same
 // side, that reference var.X, with the changed path and "<type> via var.X".
-// Nil when there are none.
+// A class read on a line added at head (an altered line is one removed and
+// one added) also adds each class that widens it, access_widened for
+// identity_rights, with the same path and type; the merge-base side adds
+// none. Nil when there are none.
 func collectConsequences(ctx context.Context, repo, mergeBase, head string, files []File) ([]Consequence, error) {
 	type side struct {
 		path  string
@@ -420,7 +444,7 @@ func collectConsequences(ctx context.Context, repo, mergeBase, head string, file
 				blobs = append(blobs, b)
 			}
 		}
-		hit := func(class, p, typ string) {
+		record := func(class, p, typ string) {
 			h := hits[class]
 			if h == nil {
 				h = &struct{ paths, types map[string]bool }{map[string]bool{}, map[string]bool{}}
@@ -428,6 +452,14 @@ func collectConsequences(ctx context.Context, repo, mergeBase, head string, file
 			}
 			h.paths[p] = true
 			h.types[typ] = true
+		}
+		hit := func(class, p, typ string) {
+			record(class, p, typ)
+			if at.added {
+				for _, w := range widenedBy(class) {
+					record(w, p, typ)
+				}
+			}
 		}
 		// vars records, by directory, each variable a changed line sets and
 		// the changed paths that set it.

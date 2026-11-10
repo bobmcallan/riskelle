@@ -140,6 +140,7 @@ or absolute glob are refused by name: a repo class can only raise the level.
 
 | Class | Floor | Read from |
 | --- | --- | --- |
+| `access_widened` | High | A line added at head that carries `identity_rights`: a grant added or altered, a variable it uses included; the same paths and types |
 | `definition_write` | High | Added lines of any text file but docs: a logical shell command that is `az devops invoke` with `--area release` or `build` and an `--http-method` of `PUT`, `POST`, `PATCH` or `DELETE`; `az pipelines` or `az pipelines release` directly followed by `create`, `update` or `delete`; or `curl`, `az rest` or `Invoke-RestMethod` with a write method against a URL containing `_apis/release/definitions` or `_apis/build/definitions` |
 | `identity_rights` | Medium | `aws_iam_*`, `azuread_administrative_unit_member`, `azuread_app_role_assignment`, `azuread_application*`, `azuread_directory_role*`, `azuread_group_member`, `azuread_group_role_management_policy`, `azuread_service_principal*`, `azuredevops_*_permissions`, `azuredevops_branch_policy_*`, `azuredevops_check_*`, `azuredevops_environment*`, `azuredevops_group_membership`, `azuredevops_pipeline_authorization`, `azuredevops_resource_authorization`, `azuredevops_securityrole_assignment`, `azuredevops_serviceendpoint_*`, `azurerm_federated_identity_credential`, `azurerm_role_assignment`, `azurerm_role_definition`, `azurerm_user_assigned_identity`, `github_actions_*_oidc_subject_claim_customization_template`, `github_actions_*_permissions`, `github_actions_environment_*`, `github_branch_protection*`, `github_organization_ruleset`, `github_repository_collaborator*`, `github_repository_environment*`, `github_repository_ruleset`, `github_team_members`, `github_team_membership`, `github_team_repository`, `google_*_iam_*` (Terraform types, globs); `azuread_group` only in its `members` or `owners` attribute, reported as `azuread_group.members` or `azuread_group.owners` |
 | `pipeline_identity` | Medium | Pipeline definitions: keys `*serviceConnection`, `azureSubscription*`, `connectedServiceName*`, `environment` (on a job), `id-token: write`, `permissions: write-all`; in a definition that carries any of these, the references `resources.repositories.ref`, `extends.template`, `stages.template`, `jobs.template`, `steps.template` |
@@ -177,6 +178,14 @@ or absolute glob are refused by name: a repo class can only raise the level.
 - A block carries its class when any line in it is added, removed or altered:
   added lines are read at head, removed ones at the merge base. A rename is
   checked at both paths.
+- A line added at head (an altered line is one removed and one added) that
+  carries `identity_rights` carries `access_widened` too, floor High, with the
+  same path and type, `<type> via var.X` included: a grant added or altered
+  makes the change High. A change whose `identity_rights` lines are all
+  removed ones (a grant, a member or a `.tfvars` assignment removed) carries
+  `identity_rights` alone and stays Medium. Any added line in a catalogued
+  block counts, and what the value grants is not read, so removing a
+  restricting line (a condition or a deny) is a removed line and stays Medium.
 - Blocks are found by their header at column 0, as `terraform fmt` writes every
   file; a heredoc body (such as a JSON policy) belongs to its block wherever it
   starts. A file that is not formatted may be misread.
@@ -412,7 +421,8 @@ a JSON plan file that predicts the change:
   expected to carry, such as `{"path": "iam/roles.tf", "added": 20,
   "consequences": ["identity_rights"]}` or `{"path": "pipelines/release.yml",
   "added": 40, "consequences": ["pipeline_identity"]}`; see
-  [Consequences](#consequences). An
+  [Consequences](#consequences). A planned path that adds or alters a grant
+  names both, `"consequences": ["identity_rights", "access_widened"]`. An
   unknown class, or one listed twice for a path, is refused by name. It names
   built-in classes only: a repo class is found from the planned path, by the
   globs in the target's rules, as for a real diff.

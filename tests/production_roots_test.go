@@ -29,9 +29,10 @@ func grantTF(n int) string {
 
 // TestProductionRootFloorsHigh drives the built binary over a change modelled
 // on a real one: about 220 lines of Terraform granting an identity rights in
-// a production root, Low by shape, is reported High; the same grant outside
-// every root is Medium; a root with no consequence changes nothing; roots
-// added by the change itself are not read; estimate agrees.
+// a production root, Low by shape, is reported High with both classes naming
+// the root; the same grant outside every root is High too, as a new grant is
+// (access_widened), but names no root; a root with no consequence changes
+// nothing; roots added by the change itself are not read; estimate agrees.
 func TestProductionRootFloorsHigh(t *testing.T) {
 	bin := buildRiskelle(t, t.TempDir())
 	const rootsJSON = `{"production_roots":["prod-tenant/**"]}`
@@ -70,7 +71,8 @@ func TestProductionRootFloorsHigh(t *testing.T) {
 		if got.Total >= 20 || got.Total != sum(got) || got.Level != score.High {
 			t.Errorf("total %d (sum %d) level %s, want a Low total equal to the sum, level High", got.Total, sum(got), got.Level)
 		}
-		want := `[{"class":"identity_rights","paths":["prod-tenant/identity.tf"],"types":["azurerm_role_assignment"],"floor":"High","production_roots":["prod-tenant/**"]}]`
+		want := `[{"class":"access_widened","paths":["prod-tenant/identity.tf"],"types":["azurerm_role_assignment"],"floor":"High","production_roots":["prod-tenant/**"]},` +
+			`{"class":"identity_rights","paths":["prod-tenant/identity.tf"],"types":["azurerm_role_assignment"],"floor":"High","production_roots":["prod-tenant/**"]}]`
 		if b, _ := json.Marshal(got.Consequences); string(b) != want {
 			t.Errorf("consequences = %s, want %s", b, want)
 		}
@@ -96,8 +98,8 @@ func TestProductionRootFloorsHigh(t *testing.T) {
 
 	t.Run("same grant outside every root", func(t *testing.T) {
 		got, out := run(t, rulesFixture(t, base, map[string]string{"sandbox/identity.tf": grantTF(210)}))
-		if got.Level != score.Medium || strings.Contains(out, "production_roots") {
-			t.Errorf("level %s, want Medium with no production_roots:\n%s", got.Level, out)
+		if got.Level != score.High || strings.Contains(out, "production_roots") {
+			t.Errorf("level %s, want High with no production_roots:\n%s", got.Level, out)
 		}
 	})
 
@@ -109,11 +111,11 @@ func TestProductionRootFloorsHigh(t *testing.T) {
 	})
 
 	t.Run("roots added by the change are not read", func(t *testing.T) {
-		got, _ := run(t, rulesFixture(t,
+		got, out := run(t, rulesFixture(t,
 			map[string]string{"prod-tenant/main.tf": tfStorage},
 			map[string]string{".risk/rules.json": rootsJSON, "prod-tenant/identity.tf": grantTF(210)}))
-		if got.Level != score.Medium || got.Provenance.RulesHash == rootedHash {
-			t.Errorf("level %s hash %s, want Medium under the built-in rules", got.Level, got.Provenance.RulesHash)
+		if got.Level != score.High || got.Provenance.RulesHash == rootedHash || strings.Contains(out, "production_roots") {
+			t.Errorf("level %s hash %s, want High under the built-in rules with no production_roots:\n%s", got.Level, got.Provenance.RulesHash, out)
 		}
 	})
 }

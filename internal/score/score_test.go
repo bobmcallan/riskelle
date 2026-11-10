@@ -583,6 +583,43 @@ func TestConsequenceFloorsLevel(t *testing.T) {
 	}
 }
 
+// TestAccessWidenedFloorsHigh pins the built-in High floor: a grant added or
+// altered carries access_widened beside identity_rights, and the change is
+// High whatever its shape, with its total and breakdown untouched.
+func TestAccessWidenedFloorsHigh(t *testing.T) {
+	widened := facts.Consequence{Class: facts.ConsequenceAccessWidened, Paths: []string{"iam/main.tf"}, Types: []string{"azurerm_role_assignment"}}
+	for _, tt := range []struct {
+		name  string
+		f     facts.Facts
+		shape Level
+	}{
+		{"Low shape", levelFacts(0, 2, 0, 0), Low},
+		{"Medium shape", levelFacts(401, 2, 0, 0), Medium},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			without := Score(tt.f, Default())
+			tt.f.Consequences = []facts.Consequence{widened, identityRights[0]}
+			with := Score(tt.f, Default())
+			if with.Level != High || with.ShapeLevel != tt.shape {
+				t.Errorf("level %s shape %s, want High shape %s", with.Level, with.ShapeLevel, tt.shape)
+			}
+			if want := []string{facts.ConsequenceAccessWidened}; !reflect.DeepEqual(with.FlooredBy, want) {
+				t.Errorf("floored by %v, want %v", with.FlooredBy, want)
+			}
+			want := []Consequence{{Consequence: widened, Floor: High}, {Consequence: identityRights[0], Floor: Medium}}
+			if !reflect.DeepEqual(with.Consequences, want) {
+				t.Errorf("consequences = %+v, want %+v", with.Consequences, want)
+			}
+			if wantT := []Trigger{{Consequence: widened, Why: WhyClass}}; !reflect.DeepEqual(with.Triggers, wantT) {
+				t.Errorf("triggers = %+v, want %+v", with.Triggers, wantT)
+			}
+			if with.Total != without.Total || !reflect.DeepEqual(with.Breakdown, without.Breakdown) {
+				t.Errorf("a floor changed the total or breakdown: %d vs %d", with.Total, without.Total)
+			}
+		})
+	}
+}
+
 func TestNoConsequenceScoresAsBefore(t *testing.T) {
 	for _, f := range []facts.Facts{mixed(), levelFacts(201, 11, 3, 2), levelFacts(401, 2, 0, 0), levelFacts(801, 16, 9, 3)} {
 		r := Score(f, Default())

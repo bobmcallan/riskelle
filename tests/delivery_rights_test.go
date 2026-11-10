@@ -104,9 +104,10 @@ resource "github_actions_repository_oidc_subject_claim_customization_template" "
 // TestDeliveryRightsFloorTheLevel drives the built binary over changes
 // modelled on real ones: wiring a pipeline to a deploy identity (a service
 // connection, its authorisation, an environment and its checks) is Low by
-// shape and reported Medium, or High under a production root; altering or
-// removing one check is Medium too; GitHub delivery rights are Medium; an
-// uncatalogued Azure DevOps or GitHub type carries no consequence.
+// shape and reported High, as access_widened, and under a production root
+// both classes name the root; altering one check is High too, removing one is
+// Medium; GitHub delivery rights added are High; an uncatalogued Azure DevOps
+// or GitHub type carries no consequence.
 func TestDeliveryRightsFloorTheLevel(t *testing.T) {
 	bin := buildRiskelle(t, t.TempDir())
 	run := func(t *testing.T, dir string) (report.Report, string) {
@@ -141,10 +142,11 @@ func TestDeliveryRightsFloorTheLevel(t *testing.T) {
 	t.Run("service connection, authorisation, environment and checks", func(t *testing.T) {
 		got, _ := run(t, rulesFixture(t, base, map[string]string{"pipelines/delivery.tf": deliveryTF}))
 		lowByShape(t, got)
-		if got.Level != score.Medium {
-			t.Errorf("level %s, want Medium", got.Level)
+		if got.Level != score.High {
+			t.Errorf("level %s, want High", got.Level)
 		}
-		consequences(t, got, `[{"class":"identity_rights","paths":["pipelines/delivery.tf"],"types":`+sevenTypes+`,"floor":"Medium"}]`)
+		consequences(t, got, `[{"class":"access_widened","paths":["pipelines/delivery.tf"],"types":`+sevenTypes+`,"floor":"High"},`+
+			`{"class":"identity_rights","paths":["pipelines/delivery.tf"],"types":`+sevenTypes+`,"floor":"Medium"}]`)
 	})
 
 	t.Run("under a production root", func(t *testing.T) {
@@ -154,7 +156,9 @@ func TestDeliveryRightsFloorTheLevel(t *testing.T) {
 		if got.Level != score.High {
 			t.Errorf("level %s, want High", got.Level)
 		}
-		consequences(t, got, `[{"class":"identity_rights","paths":["prod/delivery.tf"],"types":`+sevenTypes+
+		consequences(t, got, `[{"class":"access_widened","paths":["prod/delivery.tf"],"types":`+sevenTypes+
+			`,"floor":"High","production_roots":["prod/**"]},`+
+			`{"class":"identity_rights","paths":["prod/delivery.tf"],"types":`+sevenTypes+
 			`,"floor":"High","production_roots":["prod/**"]}]`)
 	})
 
@@ -163,10 +167,11 @@ func TestDeliveryRightsFloorTheLevel(t *testing.T) {
 	t.Run("altered required-template ref", func(t *testing.T) {
 		alt := strings.Replace(deliveryTF, `repository_ref  = "refs/heads/main"`, `repository_ref  = "refs/tags/v2"`, 1)
 		got, _ := run(t, rulesFixture(t, withDelivery, map[string]string{"pipelines/delivery.tf": alt}))
-		if got.Level != score.Medium {
-			t.Errorf("level %s, want Medium", got.Level)
+		if got.Level != score.High {
+			t.Errorf("level %s, want High", got.Level)
 		}
-		consequences(t, got, `[{"class":"identity_rights","paths":["pipelines/delivery.tf"],"types":["azuredevops_check_required_template"],"floor":"Medium"}]`)
+		consequences(t, got, `[{"class":"access_widened","paths":["pipelines/delivery.tf"],"types":["azuredevops_check_required_template"],"floor":"High"},`+
+			`{"class":"identity_rights","paths":["pipelines/delivery.tf"],"types":["azuredevops_check_required_template"],"floor":"Medium"}]`)
 	})
 
 	t.Run("removed exclusive lock", func(t *testing.T) {
@@ -182,12 +187,13 @@ func TestDeliveryRightsFloorTheLevel(t *testing.T) {
 
 	t.Run("GitHub delivery rights", func(t *testing.T) {
 		got, _ := run(t, rulesFixture(t, base, map[string]string{"github/delivery.tf": githubTF}))
-		if got.Level != score.Medium {
-			t.Errorf("level %s, want Medium", got.Level)
+		if got.Level != score.High {
+			t.Errorf("level %s, want High", got.Level)
 		}
-		consequences(t, got, `[{"class":"identity_rights","paths":["github/delivery.tf"],"types":`+
-			`["github_actions_repository_oidc_subject_claim_customization_template","github_branch_protection",`+
-			`"github_repository_environment","github_repository_ruleset"],"floor":"Medium"}]`)
+		ghTypes := `["github_actions_repository_oidc_subject_claim_customization_template","github_branch_protection",` +
+			`"github_repository_environment","github_repository_ruleset"]`
+		consequences(t, got, `[{"class":"access_widened","paths":["github/delivery.tf"],"types":`+ghTypes+`,"floor":"High"},`+
+			`{"class":"identity_rights","paths":["github/delivery.tf"],"types":`+ghTypes+`,"floor":"Medium"}]`)
 	})
 
 	t.Run("uncatalogued delivery types", func(t *testing.T) {

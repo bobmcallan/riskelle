@@ -17,8 +17,9 @@ import (
 // in the High band: 510 lines added to an existing, untested Go file. With no
 // consequence, or only a Medium floor, the shape level and the level are
 // Medium and the total is still the sum of every breakdown entry; with a High
-// floor (a production root or a repo class) the level is High and floored_by
-// names it. estimate agrees.
+// floor (a production root, a grant added, or a repo class) the level is High
+// and floored_by names it. estimate agrees. The Medium floor is a grant
+// removed, since a grant added also carries access_widened.
 func TestShapeCapsAtMedium(t *testing.T) {
 	bin := buildRiskelle(t, t.TempDir())
 	calc := numbered("package core // ", 10)
@@ -96,7 +97,11 @@ func TestShapeCapsAtMedium(t *testing.T) {
 	})
 
 	t.Run("Medium floor", func(t *testing.T) {
-		got, _ := score1(t, rulesFixture(t, base, topic(map[string]string{"sandbox/identity.tf": tfRole})))
+		withGrant := map[string]string{"sandbox/identity.tf": tfStorage + "\n" + tfRole}
+		for k, v := range base {
+			withGrant[k] = v
+		}
+		got, _ := score1(t, rulesFixture(t, withGrant, topic(map[string]string{"sandbox/identity.tf": tfStorage})))
 		highBand(t, got)
 		levels(t, got, score.Medium, score.Medium, []string{})
 	})
@@ -111,7 +116,7 @@ func TestShapeCapsAtMedium(t *testing.T) {
 		dir := rulesFixture(t, base, topic(map[string]string{"prod-tenant/identity.tf": tfRole}))
 		got, _ := score1(t, dir)
 		highBand(t, got)
-		levels(t, got, score.Medium, score.High, []string{"identity_rights"})
+		levels(t, got, score.Medium, score.High, []string{"access_widened", "identity_rights"})
 		var floor score.Level
 		var roots []string
 		for _, c := range got.Consequences {
@@ -123,7 +128,7 @@ func TestShapeCapsAtMedium(t *testing.T) {
 			t.Errorf("identity_rights floor %s roots %v, want High under prod-tenant/**", floor, roots)
 		}
 		_, md := score1(t, dir, "--format", "markdown")
-		if !strings.Contains(md, "Shape level Medium; the level is High, set by the consequence floor of identity_rights.") {
+		if !strings.Contains(md, "Shape level Medium; the level is High, set by the consequence floor of access_widened, identity_rights.") {
 			t.Errorf("markdown lacks the shape level line:\n%s", md)
 		}
 	})

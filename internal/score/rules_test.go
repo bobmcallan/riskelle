@@ -12,6 +12,7 @@ import (
 func TestDefaultFloors(t *testing.T) {
 	d := Default()
 	want := []Floor{
+		{facts.ConsequenceAccessWidened, High},
 		{facts.ConsequenceDefinitionWrite, High},
 		{facts.ConsequenceIdentityRights, Medium},
 		{facts.ConsequencePipelineIdentity, Medium},
