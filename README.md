@@ -145,7 +145,7 @@ or absolute glob are refused by name: a repo class can only raise the level.
 | Class | Floor | Read from |
 | --- | --- | --- |
 | `access_widened` | High | A line added at head that carries `identity_rights` outside a delivery gate: a grant of identity rights added or altered, a variable it uses included; the same paths and types. Never a removed line, a delivery-gate line, a `description` or `display_name` label, or a line that changed only in whitespace or a comment |
-| `definition_write` | High | Added lines of any text file but docs: a logical shell command that is `az devops invoke` with `--area release` or `build` and an `--http-method` of `PUT`, `POST`, `PATCH` or `DELETE`; `az pipelines` or `az pipelines release` directly followed by `create`, `update` or `delete`; or `curl`, `az rest` or `Invoke-RestMethod` with a write method against a URL containing `_apis/release/definitions` or `_apis/build/definitions` |
+| `definition_write` | High | Added lines of any text file but docs and tests (class `test`): a logical shell command that is `az devops invoke` with `--area release` or `build` and an `--http-method` of `PUT`, `POST`, `PATCH` or `DELETE`; `az pipelines` or `az pipelines release` directly followed by `create`, `update` or `delete`; or `curl`, `az rest` or `Invoke-RestMethod` with a write method against a URL containing `_apis/release/definitions` or `_apis/build/definitions` |
 | `destructive_migration` | High | Added lines of an EF Core migration (`**/Migrations/**/*.cs`): the `migrationBuilder` calls `DeleteData`, `DropColumn`, `DropSchema`, `DropTable`, `RenameColumn`, `RenameTable`; added lines of a migration or a `.sql` file: `DROP TABLE`, `DROP COLUMN`, `DROP SCHEMA`, `DROP DATABASE`, `DROP VIEW`, `TRUNCATE`, `DELETE FROM`, `ALTER TABLE DROP` (`ALTER TABLE ... DROP`) |
 | `identity_rights` | Medium | `aws_iam_*`, `azuread_administrative_unit_member`, `azuread_app_role_assignment`, `azuread_application*`, `azuread_directory_role*`, `azuread_group_member`, `azuread_group_role_management_policy`, `azuread_service_principal*`, `azuredevops_*_permissions`, `azuredevops_branch_policy_*`, `azuredevops_check_*`, `azuredevops_environment*`, `azuredevops_group_membership`, `azuredevops_pipeline_authorization`, `azuredevops_resource_authorization`, `azuredevops_securityrole_assignment`, `azuredevops_serviceendpoint_*`, `azurerm_federated_identity_credential`, `azurerm_role_assignment`, `azurerm_role_definition`, `azurerm_user_assigned_identity`, `github_actions_*_oidc_subject_claim_customization_template`, `github_actions_*_permissions`, `github_actions_environment_*`, `github_branch_protection*`, `github_organization_ruleset`, `github_repository_collaborator*`, `github_repository_environment*`, `github_repository_ruleset`, `github_team_members`, `github_team_membership`, `github_team_repository`, `google_*_iam_*` (Terraform types, globs); `azuread_group` only in its `members` or `owners` attribute, reported as `azuread_group.members` or `azuread_group.owners` |
 | `pipeline_identity` | Medium | Pipeline definitions: keys `*serviceConnection`, `azureSubscription*`, `connectedServiceName*`, `environment` (on a job), `id-token: write`, `permissions: write-all`; in a definition that carries any of these, the references `resources.repositories.ref`, `extends.template`, `stages.template`, `jobs.template`, `steps.template` |
@@ -329,9 +329,11 @@ build definition out of band, through the Azure DevOps REST API or CLI. It is
 floored at High: reverting the merge does not undo a write the script already
 made.
 
-- Every changed file that is not binary and not docs is read, whatever its
-  extension (a `.sh`, a `.ps1`, a pipeline's inline script). Docs that spell
-  the command carry nothing.
+- Every changed file that is not binary, not docs and not a test (class
+  `test`, as Which files count decides it) is read, whatever its extension (a
+  `.sh`, a `.ps1`, a pipeline's inline script). Docs and test files that
+  spell the command carry nothing: a fixture is data a test asserts on, not a
+  script that runs.
 - Only added lines count, read at head: removing a write command writes
   nothing. A changed line carries the class when the logical command it
   belongs to is a write: a line and each following line while the line ends

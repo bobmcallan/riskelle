@@ -48,7 +48,8 @@ const ticketReadme = "# T-8\n\nRepoint release 8 to ring 2 with a PUT:\n\n" +
 // Without a write method the script carries nothing. az pipelines update and
 // a continued curl PUT to a build definition carry it; a comment, a removed
 // write and docs carry nothing; a line beside an unchanged write carries
-// nothing, and a continuation line of the write does.
+// nothing, and a continuation line of the write does. The same write in a
+// test file carries nothing, beside a script that carries it.
 func TestDefinitionWriteFloorsTheLevel(t *testing.T) {
 	bin := buildRiskelle(t, t.TempDir())
 	run := func(t *testing.T, dir string, args ...string) string {
@@ -184,6 +185,25 @@ func TestDefinitionWriteFloorsTheLevel(t *testing.T) {
 		want := `[{"class":"definition_write","paths":["tickets/T-8/release-8.sh"],"types":["az devops invoke --area release --http-method PUT"],"floor":"High"}]`
 		if c := marshal(got.Consequences); got.Level != score.High || c != want {
 			t.Errorf("level %s consequences %s, want High, %s", got.Level, c, want)
+		}
+	})
+
+	t.Run("test files", func(t *testing.T) {
+		tests := map[string]string{
+			"tests/release-8.sh":  release8(release8Put),
+			"ops/repoint_test.go": "package ops\n\nconst put = `" + release8Put + "`\n",
+		}
+		nothing(t, rulesFixture(t, base, tests))
+
+		alone := decodeReport(t, run(t, rulesFixture(t, base, map[string]string{script: release8(release8Put)})))
+		tests[script] = release8(release8Put)
+		got := decodeReport(t, run(t, rulesFixture(t, base, tests)))
+		if got.Level != score.High || !reflect.DeepEqual(got.FlooredBy, []string{"definition_write"}) {
+			t.Errorf("level %s floored_by %v, want High [definition_write]", got.Level, got.FlooredBy)
+		}
+		if len(got.Consequences) != 1 || !reflect.DeepEqual(got.Consequences[0].Paths, []string{script}) ||
+			got.Consequences[0].Floor != score.High || marshal(got.Consequences) != marshal(alone.Consequences) {
+			t.Errorf("consequences %s, want the script alone: %s", marshal(got.Consequences), marshal(alone.Consequences))
 		}
 	})
 }

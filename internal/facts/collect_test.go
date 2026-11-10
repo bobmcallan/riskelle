@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -446,6 +447,55 @@ func TestCollectConsequences(t *testing.T) {
 // TestCollectShellShebang collects each changed file's Language: Shell for an
 // extensionless file whose first line at head is a shell shebang, none for a
 // non-shell shebang, no shebang, an extension or a deleted file.
+// TestCollectDefinitionWriteSkipsTests pins that a test file is no script:
+// the same write added to five paths is carried by the one that is not of
+// class test, and by none of the test files beside it.
+func TestCollectDefinitionWriteSkipsTests(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	dir := t.TempDir()
+	runGit(t, dir, "init", "--quiet", "--initial-branch=main")
+	write(t, dir, "go.mod", "module example.com/m\n")
+	runGit(t, dir, "add", ".")
+	runGit(t, dir, "commit", "--quiet", "-m", "base")
+	runGit(t, dir, "switch", "--quiet", "-c", "feature")
+	const script = "ops/put.sh"
+	tests := []string{"ops/put_test.go", "tests/put.sh", "pkg/testdata/put.sh", "scripts/run-test.sh"}
+	for _, p := range append([]string{script}, tests...) {
+		write(t, dir, p, releasePut)
+	}
+	runGit(t, dir, "add", ".")
+	runGit(t, dir, "commit", "--quiet", "-m", "feature")
+
+	if slices.Contains(Classify(script), ClassTest) {
+		t.Fatalf("%s is class test", script)
+	}
+	for _, p := range tests {
+		if !slices.Contains(Classify(p), ClassTest) {
+			t.Fatalf("%s is not class test", p)
+		}
+	}
+	set := map[string]bool{}
+	for _, w := range definitionWrites([]byte(releasePut)) {
+		if w != "" {
+			set[w] = true
+		}
+	}
+	want := sorted(set)
+	if len(want) == 0 {
+		t.Fatal("the fixture spells no write")
+	}
+
+	got, err := Collect(context.Background(), dir, "main", "feature")
+	if err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+	if c := []Consequence{{Class: ConsequenceDefinitionWrite, Paths: []string{script}, Types: want}}; !reflect.DeepEqual(got.Consequences, c) {
+		t.Errorf("consequences = %+v\nwant %+v", got.Consequences, c)
+	}
+}
+
 func TestCollectShellShebang(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not on PATH")

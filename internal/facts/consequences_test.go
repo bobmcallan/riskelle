@@ -413,6 +413,40 @@ func TestWidenedBy(t *testing.T) {
 	}
 }
 
+// TestReadmeDefinitionWritesSkipTests pins the README's statement that test
+// files, like docs, are not read for definition writes.
+func TestReadmeDefinitionWritesSkipTests(t *testing.T) {
+	data, err := os.ReadFile("../../README.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	row := ""
+	for _, l := range strings.Split(string(data), "\n") {
+		if strings.HasPrefix(l, "| `definition_write` |") {
+			row = l
+		}
+	}
+	if !strings.Contains(row, "but docs and tests (class `test`)") {
+		t.Errorf("README's definition_write row does not leave out tests: %q", row)
+	}
+	s := string(data)
+	i := strings.Index(s, "\n**Definition writes.**")
+	if i < 0 {
+		t.Fatal("README has no Definition writes paragraph")
+	}
+	s = s[i+3:]
+	for _, end := range []string{"\n**", "\n#"} {
+		if j := strings.Index(s, end); j >= 0 {
+			s = s[:j]
+		}
+	}
+	for _, w := range []string{"not docs and not a test", "Docs and test files that spell the command carry nothing", "a fixture is data a test asserts on"} {
+		if !strings.Contains(strings.Join(strings.Fields(s), " "), w) {
+			t.Errorf("README Definition writes does not say %q", w)
+		}
+	}
+}
+
 // TestReadmeListsConsequences pins the README's Consequences section to the
 // catalog, the detection rule and the plan file key.
 func TestReadmeListsConsequences(t *testing.T) {

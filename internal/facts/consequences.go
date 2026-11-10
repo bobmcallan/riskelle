@@ -626,7 +626,7 @@ func filePatch(ctx context.Context, repo, mergeBase, head string, f File) ([]byt
 // collectConsequences finds the consequence classes in the .tf files and
 // pipeline definitions of a change, reading each changed line at head when
 // added and at the merge base when removed. Every changed text file that is
-// not docs is also read at head for definition_write: an added line whose
+// neither docs nor a test is also read at head for definition_write: an added line whose
 // logical command (definitionWrites) writes a release or build definition adds
 // the class with the path and the command's type; removed lines carry none. In a .tf file a line takes the
 // type of the block it sits in, and a catalogued type adds its class with
@@ -662,10 +662,10 @@ func collectConsequences(ctx context.Context, repo, mergeBase, head string, file
 		file  int // the index in files
 	}
 	var heads, bases []side
-	// scripts are the head paths read for definition_write.
+	// scripts are the head paths read for definition_write: neither docs nor tests.
 	scripts := map[string]bool{}
 	for i, f := range files {
-		script := !f.Binary && !slices.Contains(f.Classes, ClassDocs)
+		script := !f.Binary && !slices.Contains(f.Classes, ClassDocs) && !slices.Contains(f.Classes, ClassTest)
 		if f.Binary || !(readable(f.Path) || readable(f.OldPath) || script) {
 			continue
 		}
