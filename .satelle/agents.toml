@@ -21,7 +21,10 @@ command = "cursor-agent"
 model = "gemini-3.8-flash-low"
 tools = ["Read", "Grep", "Glob"]
 
-# Second plan judge: both must accept a plan.
+# Second plan judge: Grok 4.7 on Cursor's own CLI (effort in the model id);
+# both must accept a plan. Every dispatched step runs on cursor-agent, and the
+# judges stay in other families than the planner.
 [agents.reviewer-grok]
-command = "grok"
+command = "cursor-agent"
+model = "grok-4.7-medium"
 tools = ["Read", "Grep", "Glob"]
