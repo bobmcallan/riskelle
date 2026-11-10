@@ -137,6 +137,84 @@ resource "azuredevops_pipeline_authorization" "app" {
   pipeline_id = each.value.pipeline_id
 }
 `
+	// deliveryRoleAssignment makes one identity Administrator on each of the
+	// environments a local lists.
+	deliveryRoleAssignment = `locals {
+  dev_environments = {
+    app = { environment_id = 201 } # dev
+  }
+}
+
+data "azuredevops_identity_user" "applier" {
+  name          = "applier@example.com"
+  search_filter = "MailAddress"
+}
+
+resource "azuredevops_securityrole_assignment" "dev_applier" {
+  for_each = local.dev_environments
+
+  scope       = "distributedtask.environmentreferencerole"
+  resource_id = "${data.azuredevops_project.p.id}_${each.value.environment_id}"
+  identity_id = data.azuredevops_identity_user.applier.id
+  role_name   = "Administrator"
+}
+`
+	// deliveryBuildLease is a build definition, a pipeline authorised for an
+	// environment, and the build service allowed to retain its runs.
+	deliveryBuildLease = `resource "azuredevops_build_definition" "app" {
+  project_id = data.azuredevops_project.p.id
+  name       = "app promote"
+}
+
+resource "azuredevops_pipeline_authorization" "app_qa" {
+  project_id  = data.azuredevops_project.p.id
+  resource_id = "202"
+  type        = "environment"
+  pipeline_id = azuredevops_build_definition.app.id
+}
+
+resource "azuredevops_build_definition_permissions" "lease" {
+  project_id          = data.azuredevops_project.p.id
+  principal           = local.build_service
+  build_definition_id = azuredevops_build_definition.app.id
+  replace             = false
+
+  permissions = {
+    RetainIndefinitely = "Allow"
+  }
+}
+`
+	deliveryRoles = `resource "azuredevops_securityrole_assignment" "reader" {
+  scope       = "distributedtask.environmentreferencerole"
+  resource_id = "p_201"
+  identity_id = "i"
+  role_name   = "Reader"
+}
+`
+	deliveryRetention = `variable "retain" {
+  type    = string
+  default = "Allow"
+}
+
+resource "azuredevops_build_definition_permissions" "retain" {
+  project_id          = data.azuredevops_project.p.id
+  principal           = "b"
+  build_definition_id = "48"
+
+  permissions = {
+    RetainIndefinitely = var.retain
+  }
+}
+`
+	deliveryProjectRights = `resource "azuredevops_project_permissions" "builders" {
+  project_id = data.azuredevops_project.p.id
+  principal  = "b"
+
+  permissions = {
+    GENERIC_WRITE = "Allow"
+  }
+}
+`
 	deliveryIAM = `data "azuread_service_principal" "deployer" {
   display_name = "deployer-one"
 }
@@ -155,8 +233,10 @@ resource "azuread_directory_role" "reader" {
 // Medium on identity_rights alone (the removed checks and the environments)
 // and the report never names access_widened. Each restyle or label edit
 // alone widens nothing. Neither does a delivery gate added or altered: a
-// changed template ref, an approver added to a check, or a pipeline
-// authorised for an environment is Medium. A display_name that selects what
+// changed template ref, an approver added to a check, a pipeline authorised
+// for an environment, a role on one environment or the permissions on one
+// build definition is Medium; a role with another scope or one that cannot
+// be read, and project permissions, are High. A display_name that selects what
 // a grant targets still widens.
 func TestAccessWidenedNeedsAWidening(t *testing.T) {
 	bin := buildRiskelle(t, t.TempDir())
@@ -169,7 +249,13 @@ func TestAccessWidenedNeedsAWidening(t *testing.T) {
 		"delivery/variables.tf":     deliveryVariables,
 		"delivery/terraform.tfvars": deliveryTfvars,
 		"delivery/iam.tf":           deliveryIAM,
+		"delivery/roles.tf":         deliveryRoles,
+		"delivery/retention.tf":     deliveryRetention,
 	}
+	const (
+		roleType = `"types":["azuredevops_securityrole_assignment"]`
+		envScope = `"distributedtask.environmentreferencerole"`
+	)
 	replace := func(s, old, new string) string {
 		t.Helper()
 		if !strings.Contains(s, old) {
@@ -232,6 +318,32 @@ func TestAccessWidenedNeedsAWidening(t *testing.T) {
 		{"a pipeline authorised for an environment in a new file, through for_each over a local",
 			map[string]string{"delivery/authorization.tf": deliveryAuthorization},
 			score.Medium, []string{"identity_rights"}, alone("delivery/authorization.tf", `"types":["azuredevops_pipeline_authorization"]`)},
+		{"an identity made Administrator on one environment, through for_each over a local",
+			map[string]string{"delivery/applier.tf": deliveryRoleAssignment},
+			score.Medium, []string{"identity_rights"}, alone("delivery/applier.tf", roleType)},
+		{"a build service allowed to retain one definition's runs, beside a pipeline authorisation",
+			map[string]string{"delivery/lease.tf": deliveryBuildLease},
+			score.Medium, []string{"identity_rights"},
+			alone("delivery/lease.tf", `"types":["azuredevops_build_definition_permissions","azuredevops_pipeline_authorization"]`)},
+		{"a role changed within the environment scope",
+			map[string]string{"delivery/roles.tf": replace(deliveryRoles, `"Reader"`, `"Administrator"`)},
+			score.Medium, []string{"identity_rights"}, alone("delivery/roles.tf", roleType)},
+		{"a variable only build-definition permissions use",
+			map[string]string{"delivery/retention.tf": replace(deliveryRetention, `default = "Allow"`, `default = "Deny"`)},
+			score.Medium, []string{"identity_rights"},
+			alone("delivery/retention.tf", `"types":["azuredevops_build_definition_permissions via var.retain"]`)},
+		{"a scope changed from the environment to a service connection",
+			map[string]string{"delivery/roles.tf": replace(deliveryRoles, envScope, `"distributedtask.serviceendpointrole"`)},
+			score.High, []string{"access_widened"}, both("delivery/roles.tf", roleType)},
+		{"a role assignment scoped to a service connection",
+			map[string]string{"delivery/applier.tf": replace(deliveryRoleAssignment, envScope, `"distributedtask.serviceendpointrole"`)},
+			score.High, []string{"access_widened"}, both("delivery/applier.tf", roleType)},
+		{"a role assignment whose scope is a local",
+			map[string]string{"delivery/applier.tf": replace(deliveryRoleAssignment, envScope, `local.role_scope`)},
+			score.High, []string{"access_widened"}, both("delivery/applier.tf", roleType)},
+		{"project permissions",
+			map[string]string{"delivery/project_rights.tf": deliveryProjectRights},
+			score.High, []string{"access_widened"}, both("delivery/project_rights.tf", `"types":["azuredevops_project_permissions"]`)},
 		{"a display_name that selects the principal a grant targets",
 			map[string]string{"delivery/iam.tf": replace(deliveryIAM, "deployer-one", "deployer-two")},
 			score.High, []string{"access_widened"}, both("delivery/iam.tf", `"types":["azuread_service_principal"]`)},
@@ -255,5 +367,29 @@ func TestAccessWidenedNeedsAWidening(t *testing.T) {
 				t.Errorf("report names access_widened:\n%s", out)
 			}
 		})
+	}
+}
+
+// TestScopedGatesUnderAProductionRoot drives the built binary over the two
+// gates added inside a repo's production root: neither widens, and the root
+// raises identity_rights to High, naming itself.
+func TestScopedGatesUnderAProductionRoot(t *testing.T) {
+	bin := buildRiskelle(t, t.TempDir())
+	dir := rulesFixture(t,
+		map[string]string{".risk/rules.json": `{"production_roots":["prod/**"]}`, "prod/main.tf": deliveryMain},
+		map[string]string{"prod/applier.tf": deliveryRoleAssignment, "prod/lease.tf": deliveryBuildLease})
+	code, out, stderr := runScore(t, bin, dir, "--base", "main", "--head", "topic")
+	if code != 0 {
+		t.Fatalf("score exit %d: %s", code, stderr)
+	}
+	got := decodeReport(t, out)
+	want := `[{"class":"identity_rights","paths":["prod/applier.tf","prod/lease.tf"],` +
+		`"types":["azuredevops_build_definition_permissions","azuredevops_pipeline_authorization","azuredevops_securityrole_assignment"],` +
+		`"floor":"High","production_roots":["prod/**"]}]`
+	if b, _ := json.Marshal(got.Consequences); got.Level != score.High || string(b) != want {
+		t.Errorf("level %s consequences = %s\nwant High %s", got.Level, b, want)
+	}
+	if strings.Contains(out, "access_widened") {
+		t.Errorf("report names access_widened:\n%s", out)
 	}
 }

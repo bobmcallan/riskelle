@@ -64,8 +64,12 @@ type Consequence struct {
 // resource, the environment, its checks, branch policies, protections and
 // rulesets. A gate takes effect only when a pipeline then runs, and a revert
 // of the merge puts it back, so a line in one never carries access_widened
-// either. Identities and what they may do (service connections, permissions,
-// memberships, role assignments) are grants and do.
+// either. Rights over one piece of delivery machinery are gates too: the
+// permissions on one build definition, and (gateWhen) a role assignment
+// whose scope is one environment. They take effect only when someone then
+// acts on that environment or pipeline. Every other identity and what it may
+// do (service connections, other permissions, memberships, role assignments)
+// is a grant and widens.
 //
 // definition_update is a script that updates an existing release or build
 // definition out of band, with a PUT or PATCH: the service keeps every
@@ -88,17 +92,19 @@ var builtinConsequences = []struct {
 	class      string
 	patterns   []string
 	keys       []string
-	commands   []string            // the command forms a definition_update or definition_write type starts with
-	operations []string            // the operation types destructiveOperations reports
-	attributes map[string][]string // exact type: the top-level attributes whose lines carry the class
-	widens     string              // the class this one accompanies on a line added at head
-	labels     []string            // the top-level attributes on whose lines a widening class does not accompany
-	gates      []string            // the block types whose lines a widening class does not accompany: delivery gates
-	removed    []string            // resource types whose block removed from its directory carries the class
-	secrets    []secretRule        // the rules whose match on a line added at head carries the class
+	commands   []string             // the command forms a definition_update or definition_write type starts with
+	operations []string             // the operation types destructiveOperations reports
+	attributes map[string][]string  // exact type: the top-level attributes whose lines carry the class
+	widens     string               // the class this one accompanies on a line added at head
+	labels     []string             // the top-level attributes on whose lines a widening class does not accompany
+	gates      []string             // the block types whose lines a widening class does not accompany: delivery gates
+	gateWhen   map[string][2]string // exact type: the top-level attribute and the literal value it must hold for the block to be a delivery gate
+	removed    []string             // resource types whose block removed from its directory carries the class
+	secrets    []secretRule         // the rules whose match on a line added at head carries the class
 }{
 	{class: ConsequenceAccessWidened, widens: ConsequenceIdentityRights, labels: []string{"description", "display_name"}, gates: []string{
 		"azuredevops_branch_policy_*",
+		"azuredevops_build_definition_permissions",
 		"azuredevops_check_*",
 		"azuredevops_environment*",
 		"azuredevops_pipeline_authorization",
@@ -108,6 +114,10 @@ var builtinConsequences = []struct {
 		"github_organization_ruleset",
 		"github_repository_environment*",
 		"github_repository_ruleset",
+	}, gateWhen: map[string][2]string{
+		// a role on one environment, not on a service connection, a
+		// library, an agent pool or a project
+		"azuredevops_securityrole_assignment": {"scope", "distributedtask.environmentreferencerole"},
 	}},
 	{class: ConsequenceDefinitionUpdate, commands: []string{
 		"az devops invoke", "az pipelines", "az rest", "curl", "Invoke-RestMethod",
@@ -251,17 +261,51 @@ func label(l tfLine) bool {
 // protections and rulesets. A class read on its lines is recorded, but not
 // the class that widens it: a gate takes effect only when a pipeline runs,
 // and a revert of the merge puts it back. A permissions type grants, whatever
-// it guards, and is never a gate.
+// it guards: it is a gate only when the catalog lists it by its exact name,
+// as the permissions on one build definition are, never through a glob.
 func gate(block string) bool {
-	if strings.HasSuffix(block, "_permissions") {
-		return false
-	}
-	for _, c := range compiledConsequences {
-		if c.gates.Match(block) {
+	permissions := strings.HasSuffix(block, "_permissions")
+	for i, c := range compiledConsequences {
+		if permissions && slices.Contains(builtinConsequences[i].gates, block) || !permissions && c.gates.Match(block) {
 			return true
 		}
 	}
 	return false
+}
+
+// literalAttr matches a top-level attribute line whose whole value is one
+// plain string literal, capturing the attribute and the string: no
+// interpolation, reference or expression, and nothing after it but a comment.
+var literalAttr = regexp.MustCompile(`^[ \t]*([A-Za-z_][A-Za-z0-9_-]*)[ \t]*=[ \t]*"([^"$%\\]*)"[ \t\r]*(?:(?:#|//).*)?$`)
+
+// scopedGate reports whether line i is in a block the catalog makes a
+// delivery gate by one of its attributes (gateWhen): the block's own line
+// for that attribute holds exactly the catalogued string literal. Only the
+// block's lines are read, at the side they were read at: a variable, a local,
+// an expression, a multi-line value or a missing attribute is no gate.
+func scopedGate(lines []tfLine, text []string, i int) bool {
+	l := lines[i]
+	if l.start == 0 {
+		return false
+	}
+	for _, c := range builtinConsequences {
+		when, ok := c.gateWhen[l.block]
+		if !ok {
+			continue
+		}
+		for j := l.start; j < len(lines) && lines[j].start == l.start; j++ {
+			if m := literalAttr.FindStringSubmatch(text[j]); m != nil && lines[j].attr == when[0] && m[1] == when[0] {
+				return m[2] == when[1]
+			}
+		}
+	}
+	return false
+}
+
+// inGate reports whether line i cannot widen its class because of the block
+// it is in: a delivery gate by type (gate) or by an attribute (scopedGate).
+func inGate(lines []tfLine, text []string, i int) bool {
+	return gate(lines[i].block) || scopedGate(lines, text, i)
 }
 
 // hclComment reports whether a line, less its leading whitespace, is a
@@ -429,10 +473,13 @@ var blockHeader = regexp.MustCompile(`^(resource|data)[ \t]+"?([A-Za-z][A-Za-z0-
 // whose attributes are tracked as a variable block's are; "" otherwise. data
 // is set on every line of a data block. inert is set on a blank line and on a
 // full-line comment outside a heredoc body: it changes nothing, so it carries
-// no class and sets no variable.
+// no class and sets no variable. start is the 1-based line number of the
+// header of the resource or data block the line belongs to, 0 when none: two
+// adjacent blocks of one type differ by it.
 type tfLine struct {
 	block, attr, variable, address, gone string
 	data, inert                          bool
+	start                                int
 }
 
 // tfAttr matches the identifier that opens a top-level attribute line.
@@ -458,8 +505,10 @@ var tfAttr = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_-]*`)
 func terraformBlocks(content []byte) []tfLine {
 	lines := strings.Split(string(content), "\n")
 	out := make([]tfLine, len(lines))
-	open, vname, gone, heredoc, attr, col, data := "", "", "", "", "", -1, false
-	line := func(a string) tfLine { return tfLine{block: open, attr: a, variable: vname, gone: gone, data: data} }
+	open, vname, gone, heredoc, attr, col, data, start := "", "", "", "", "", -1, false, 0
+	line := func(a string) tfLine {
+		return tfLine{block: open, attr: a, variable: vname, gone: gone, data: data, start: start}
+	}
 	for i, l := range lines {
 		trimmed := strings.TrimLeft(l, " \t")
 		switch {
@@ -494,11 +543,11 @@ func terraformBlocks(content []byte) []tfLine {
 			out[i].inert = hclComment(trimmed)
 		case l[0] == '}':
 			out[i] = line("")
-			open, vname, gone, attr, col, data = "", "", "", "", -1, false
+			open, vname, gone, attr, col, data, start = "", "", "", "", -1, false, 0
 		default:
-			open, vname, gone, attr, col, data = "", "", "", "", -1, false
+			open, vname, gone, attr, col, data, start = "", "", "", "", -1, false, 0
 			if m := blockHeader.FindStringSubmatch(l); m != nil {
-				open, data = m[2], m[1] == "data"
+				open, data, start = m[2], m[1] == "data", i+1
 			} else if m := variableHeader.FindStringSubmatch(l); m != nil {
 				vname = m[1]
 			} else if m := goneHeader.FindStringSubmatch(l); m != nil {
@@ -509,7 +558,7 @@ func terraformBlocks(content []byte) []tfLine {
 				out[i].address = m[1] + "." + m[2]
 			}
 			if strings.HasSuffix(strings.TrimRight(l, " \t\r"), "}") {
-				open, vname, gone, data = "", "", "", false // a one-line block
+				open, vname, gone, data, start = "", "", "", false, 0 // a one-line block
 			}
 		}
 		if m := heredocStart.FindStringSubmatch(l); m != nil {
@@ -806,7 +855,7 @@ func collectConsequences(ctx context.Context, repo, mergeBase, head string, file
 				}
 				return
 			}
-			lines := terraformBlocks(content)
+			lines, text := terraformBlocks(content), strings.Split(string(content), "\n")
 			for _, n := range want[p] {
 				if n < 1 || n > len(lines) {
 					continue
@@ -821,7 +870,7 @@ func collectConsequences(ctx context.Context, repo, mergeBase, head string, file
 				if l.block == "" {
 					continue
 				}
-				widen := at.added && !label(l) && !gate(l.block)
+				widen := at.added && !label(l) && !inGate(lines, text, n-1)
 				for _, class := range consequencesOf(l.block) {
 					hit(class, p, l.block, widen)
 				}
@@ -852,7 +901,7 @@ func collectConsequences(ctx context.Context, repo, mergeBase, head string, file
 					if l.block == "" || !refersTo(text[i], name) {
 						continue
 					}
-					widen := at.added && !label(l) && !gate(l.block)
+					widen := at.added && !label(l) && !inGate(lines, text, i)
 					for cp := range changed {
 						for _, class := range consequencesOf(l.block) {
 							hit(class, cp, l.block+" via var."+name, widen)

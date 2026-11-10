@@ -208,9 +208,58 @@ func TestLabel(t *testing.T) {
 	}
 }
 
+// TestScopedGate pins the role assignment that is a delivery gate: only a
+// block whose own scope attribute is the environment scope as a plain string
+// literal. Any other scope, a scope riskelle cannot read, and the same line
+// in another type are no gate; adjacent blocks are told apart.
+func TestScopedGate(t *testing.T) {
+	block := func(typ string, body ...string) []string {
+		return append(append([]string{`resource "` + typ + `" "x" {`}, body...), `  role_name = "Administrator"`, `}`)
+	}
+	const role = "azuredevops_securityrole_assignment"
+	env := `  scope       = "distributedtask.environmentreferencerole"`
+	for _, tt := range []struct {
+		name string
+		src  []string
+		want bool
+	}{
+		{"the environment scope", block(role, env), true},
+		{"with a trailing comment", block(role, env+" # one environment"), true},
+		{"after for_each", block(role, `  for_each = local.envs`, ``, env), true},
+		{"a service connection", block(role, `  scope = "distributedtask.serviceendpointrole"`), false},
+		{"a library", block(role, `  scope = "distributedtask.library"`), false},
+		{"an agent pool", block(role, `  scope = "distributedtask.agentqueuerole"`), false},
+		{"a project", block(role, `  scope = "distributedtask.project"`), false},
+		{"a local", block(role, `  scope = local.scope`), false},
+		{"a variable", block(role, `  scope = var.scope`), false},
+		{"an interpolation", block(role, `  scope = "${local.prefix}environmentreferencerole"`), false},
+		{"a longer string", block(role, `  scope = "distributedtask.environmentreferencerole.x"`), false},
+		{"no scope", block(role), false},
+		{"a multi-line value", block(role, `  scope = (`, `    "distributedtask.environmentreferencerole"`, `  )`), false},
+		{"a nested scope beside another", block(role, `  scope = "distributedtask.library"`, `  nested {`, `    scope = "distributedtask.environmentreferencerole"`, `  }`), false},
+		{"another type", block("azurerm_role_assignment", env), false},
+	} {
+		lines := terraformBlocks([]byte(strings.Join(tt.src, "\n")))
+		for i := range lines {
+			if got := inGate(lines, tt.src, i); got != tt.want {
+				t.Errorf("%s: line %d %q: inGate = %v, want %v", tt.name, i+1, tt.src[i], got, tt.want)
+			}
+		}
+	}
+
+	first, second := block(role, env), block(role, `  scope = "distributedtask.serviceendpointrole"`)
+	src := append(append(first, second...), `# after`)
+	lines := terraformBlocks([]byte(strings.Join(src, "\n")))
+	for i := range lines {
+		if got, want := inGate(lines, src, i), i < len(first); got != want {
+			t.Errorf("adjacent blocks: line %d %q: inGate = %v, want %v", i+1, src[i], got, want)
+		}
+	}
+}
+
 // TestGate pins the delivery gates, whose lines carry identity_rights but
-// never the class that widens it, and the identity types beside them, a
-// permissions type included, which still widen.
+// never the class that widens it, and the identity types beside them, which
+// still widen: every permissions type but the one listed by its exact name.
 func TestGate(t *testing.T) {
 	for _, typ := range []string{
 		"azuredevops_pipeline_authorization", "azuredevops_resource_authorization",
@@ -222,6 +271,7 @@ func TestGate(t *testing.T) {
 		"github_actions_environment_secret", "github_actions_environment_variable",
 		"github_branch_protection", "github_branch_protection_v3",
 		"github_repository_ruleset", "github_organization_ruleset",
+		"azuredevops_build_definition_permissions",
 	} {
 		if !gate(typ) {
 			t.Errorf("gate(%q) = false, want true", typ)
@@ -233,6 +283,7 @@ func TestGate(t *testing.T) {
 	for _, typ := range []string{
 		"azuredevops_serviceendpoint_azurerm", "azuredevops_serviceendpoint_permissions", "azuredevops_git_permissions",
 		"azuredevops_environment_permissions", "azuredevops_group_membership", "azuredevops_securityrole_assignment",
+		"azuredevops_project_permissions", "azuredevops_build_folder_permissions", "azuredevops_area_permissions",
 		"azurerm_role_assignment", "azurerm_role_definition", "azurerm_federated_identity_credential",
 		"azurerm_user_assigned_identity", "azuread_service_principal", "azuread_application",
 		"azuread_application_federated_identity_credential", "azuread_group", "azuread_group_member",
@@ -475,6 +526,9 @@ func TestReadmeListsConsequences(t *testing.T) {
 		for _, r := range c.secrets {
 			names = append(names, r.name)
 		}
+		for typ, when := range c.gateWhen {
+			names = append(names, typ, when[0], `"`+when[1]+`"`)
+		}
 		for typ, attrs := range c.attributes {
 			names = append(names, typ)
 			for _, a := range attrs {
@@ -575,6 +629,9 @@ func TestTerraformVariables(t *testing.T) {
 	got := terraformBlocks([]byte(strings.Join(text, "\n")))
 	for i, l := range src {
 		want := tfLine{block: l.block, attr: l.attr, variable: l.variable}
+		if l.block != "" {
+			want.start = 13 // the resource header's line
+		}
 		if strings.HasPrefix(l.line, "resource ") {
 			want.address = "azuredevops_check_required_template.r"
 		}

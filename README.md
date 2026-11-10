@@ -157,8 +157,10 @@ or absolute glob are refused by name: a repo class can only raise the level.
 - Delivery rights count as identity and rights: Azure DevOps and GitHub service
   connections and their authorisations, deployment environments and their
   checks, branch policies and protections, and permissions decide who can act
-  as a deploy identity. Service connections and permissions are identities
-  and what they may do; the rest are delivery gates (below). Generic secrets
+  as a deploy identity. Service connections, memberships, role assignments
+  and permissions are identities and what they may do, except a role on one
+  environment and the permissions on one build definition; those and the
+  rest are delivery gates (below). Generic secrets
   and variables
   (`github_actions_secret`, `azuredevops_variable_group`) do not.
 - Group membership counts too: who is in a group decides who holds the roles
@@ -209,17 +211,24 @@ or absolute glob are refused by name: a repo class can only raise the level.
   `azuredevops_environment*`, `azuredevops_check_*`,
   `azuredevops_branch_policy_*`, `github_repository_environment*`,
   `github_actions_environment_*`, `github_branch_protection*`,
-  `github_repository_ruleset` and `github_organization_ruleset`, but never a
-  `*_permissions` type. Which pipeline may use an environment or resource,
-  the environment, its checks, policies, protections and rulesets take effect
-  only when a pipeline then runs, and a revert of the merge puts them back:
+  `github_repository_ruleset`, `github_organization_ruleset`,
+  `azuredevops_build_definition_permissions` (but no other `*_permissions`
+  type), and an `azuredevops_securityrole_assignment` whose `scope` is the
+  literal `"distributedtask.environmentreferencerole"`. Which pipeline may
+  use an environment or resource, the environment, its checks, policies,
+  protections and rulesets take effect only when a pipeline then runs, and
+  rights over one environment or one build definition only when someone then
+  acts on that environment or pipeline; a revert of the merge puts them back:
   a line in one, or a variable only a gate uses, carries `identity_rights`
   (Medium) but never `access_widened`. Adding a check is a restriction. What
   a gate guards is not read (an environment is often a bare id), so a Dev and
   a production environment read the same; a change to a pipeline that deploys
   to production is already `production_deploy`, and a repo that wants its
   production gates High names a production root or a repo class over those
-  paths.
+  paths. For the role assignment, the block's own `scope` must be that plain
+  string: any other scope (a service connection, a library, an agent pool, a
+  project), or one given as a variable, a local or an expression, stays
+  `access_widened`. Which role or permission is granted is not read.
 - A restyle is not a change. In a `.tf` or `.tfvars` file, a removed line and
   a later added line of the same hunk that differ only in whitespace outside
   a string or in a trailing `#` or `//` comment are the same line, as when
