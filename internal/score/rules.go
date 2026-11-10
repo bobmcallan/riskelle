@@ -125,6 +125,11 @@ func Default() Rules {
 		ShapeCap: Medium,
 
 		// A consequence raises the level to at least its floor, never the total.
-		ConsequenceFloors: []Floor{{facts.ConsequenceIdentityRights, Medium}, {facts.ConsequencePipelineIdentity, Medium}},
+		// definition_write is High: a revert cannot undo a write made out of band.
+		ConsequenceFloors: []Floor{
+			{facts.ConsequenceDefinitionWrite, High},
+			{facts.ConsequenceIdentityRights, Medium},
+			{facts.ConsequencePipelineIdentity, Medium},
+		},
 	}
 }

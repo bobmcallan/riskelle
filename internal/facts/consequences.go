@@ -5,6 +5,7 @@ import (
 	"context"
 	"path"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -14,6 +15,7 @@ import (
 // from its changed lines, not where it lands: a class sets a floor on the
 // level the change is reported at.
 const (
+	ConsequenceDefinitionWrite  = "definition_write"
 	ConsequenceIdentityRights   = "identity_rights"
 	ConsequencePipelineIdentity = "pipeline_identity"
 )
@@ -21,7 +23,7 @@ const (
 // Consequence is one class a change carries, the changed or planned paths
 // that triggered it and the Terraform block types (with ".<attribute>" when
 // an attribute of the block carried it, and " via var.<name>" when a changed
-// variable that the block uses did) or pipeline keys that did. Both lists are sorted,
+// variable that the block uses did), pipeline keys or commands that did. Both lists are sorted,
 // distinct and non-nil; Types is empty for a plan, which has no content.
 type Consequence struct {
 	Class string   `json:"class"`
@@ -30,8 +32,9 @@ type Consequence struct {
 }
 
 // builtinConsequences is the one catalog of consequence classes: for each, the
-// globs over Terraform resource and data types that carry it, or the pipeline
-// keys that do (pipelines.go). Sorted by class
+// globs over Terraform resource and data types that carry it, the pipeline
+// keys that do (pipelines.go), or the command forms that do (definitions.go).
+// Sorted by class
 // and versioned with each release, beside builtin (classes.go) and
 // builtinAreas (areas.go).
 //
@@ -39,12 +42,19 @@ type Consequence struct {
 // authorisations, deployment environments and their checks, branch policies
 // and protections, and permissions decide who can act as a deploy identity,
 // as a federated credential does. Generic secret and variable stores do not.
+//
+// definition_write is a script that writes a release or build definition out
+// of band: reverting the merge does not undo a write already made.
 var builtinConsequences = []struct {
 	class      string
 	patterns   []string
 	keys       []string
+	commands   []string            // the command forms a definition_write type starts with
 	attributes map[string][]string // exact type: the top-level attributes whose lines carry the class
 }{
+	{class: ConsequenceDefinitionWrite, commands: []string{
+		"az devops invoke", "az pipelines", "az pipelines release", "az rest", "curl", "Invoke-RestMethod",
+	}},
 	{class: ConsequenceIdentityRights, patterns: []string{
 		"aws_iam_*",
 		"azuread_administrative_unit_member",
@@ -336,7 +346,10 @@ func span(start, count string) []int {
 
 // collectConsequences finds the consequence classes in the .tf files and
 // pipeline definitions of a change, reading each changed line at head when
-// added and at the merge base when removed. In a .tf file a line takes the
+// added and at the merge base when removed. Every changed text file that is
+// not docs is also read at head for definition_write: an added line whose
+// logical command (definitionWrites) writes a release or build definition adds
+// the class with the path and the command's type; removed lines carry none. In a .tf file a line takes the
 // type of the block it sits in, and a catalogued type adds its class with
 // that side's path and the type. In a pipeline definition a line's
 // pipelineIdentity mark adds pipeline_identity with the path and the mark.
@@ -344,15 +357,18 @@ func span(start, count string) []int {
 // line in a variable "X" block's attributes other than description) adds the
 // classes of the catalogued blocks in that directory's .tf files, at the same
 // side, that reference var.X, with the changed path and "<type> via var.X".
-// No other file is read. Nil when there are none.
+// Nil when there are none.
 func collectConsequences(ctx context.Context, repo, mergeBase, head string, files []File) ([]Consequence, error) {
 	type side struct {
 		path  string
 		lines []int
 	}
 	var heads, bases []side
+	// scripts are the head paths read for definition_write.
+	scripts := map[string]bool{}
 	for _, f := range files {
-		if f.Binary || !(readable(f.Path) || readable(f.OldPath)) {
+		script := !f.Binary && !slices.Contains(f.Classes, ClassDocs)
+		if f.Binary || !(readable(f.Path) || readable(f.OldPath) || script) {
 			continue
 		}
 		args := []string{"--literal-pathspecs", "--attr-source=" + head, "diff", "-U0"}
@@ -370,8 +386,11 @@ func collectConsequences(ctx context.Context, repo, mergeBase, head string, file
 		if f.OldPath != "" {
 			oldPath = f.OldPath
 		}
-		if len(new) > 0 && readable(f.Path) {
+		if len(new) > 0 && (readable(f.Path) || script) {
 			heads = append(heads, side{f.Path, new})
+			if script {
+				scripts[f.Path] = true
+			}
 		}
 		if len(old) > 0 && readable(oldPath) {
 			bases = append(bases, side{oldPath, old})
@@ -382,7 +401,8 @@ func collectConsequences(ctx context.Context, repo, mergeBase, head string, file
 	for _, at := range []struct {
 		commit string
 		sides  []side
-	}{{head, heads}, {mergeBase, bases}} {
+		added  bool
+	}{{head, heads, true}, {mergeBase, bases, false}} {
 		if len(at.sides) == 0 {
 			continue
 		}
@@ -424,6 +444,17 @@ func collectConsequences(ctx context.Context, repo, mergeBase, head string, file
 		}
 		err = catBlobs(ctx, repo, blobs, func(p string, content []byte) {
 			content = bytes.TrimSuffix(content, []byte("\n"))
+			if at.added && scripts[p] {
+				writes := definitionWrites(content)
+				for _, n := range want[p] {
+					if n >= 1 && n <= len(writes) && writes[n-1] != "" {
+						hit(ConsequenceDefinitionWrite, p, writes[n-1])
+					}
+				}
+			}
+			if !readable(p) {
+				return
+			}
 			if isTfvars(p) {
 				names := tfvarsAssignments(content)
 				for _, n := range want[p] {
