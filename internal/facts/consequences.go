@@ -14,14 +14,16 @@ import (
 // from its changed lines, not where it lands: a class sets a floor on the
 // level the change is reported at.
 const (
-	ConsequenceIdentityRights   = "identity_rights"
-	ConsequencePipelineIdentity = "pipeline_identity"
+	ConsequenceDestructiveMigration = "destructive_migration"
+	ConsequenceIdentityRights       = "identity_rights"
+	ConsequencePipelineIdentity     = "pipeline_identity"
 )
 
 // Consequence is one class a change carries, the changed or planned paths
 // that triggered it and the Terraform block types (with ".<attribute>" when
 // an attribute of the block carried it, and " via var.<name>" when a changed
-// variable that the block uses did) or pipeline keys that did. Both lists are sorted,
+// variable that the block uses did), pipeline keys or destructive operations
+// that did. Both lists are sorted,
 // distinct and non-nil; Types is empty for a plan, which has no content.
 type Consequence struct {
 	Class string   `json:"class"`
@@ -30,8 +32,9 @@ type Consequence struct {
 }
 
 // builtinConsequences is the one catalog of consequence classes: for each, the
-// globs over Terraform resource and data types that carry it, or the pipeline
-// keys that do (pipelines.go). Sorted by class
+// globs over Terraform resource and data types that carry it, the pipeline
+// keys that do (pipelines.go), or the destructive operations that do
+// (destructive.go). Sorted by class
 // and versioned with each release, beside builtin (classes.go) and
 // builtinAreas (areas.go).
 //
@@ -43,8 +46,14 @@ var builtinConsequences = []struct {
 	class      string
 	patterns   []string
 	keys       []string
+	operations []string            // the operation types destructiveOperations reports
 	attributes map[string][]string // exact type: the top-level attributes whose lines carry the class
 }{
+	{class: ConsequenceDestructiveMigration, operations: []string{
+		"DeleteData", "DropColumn", "DropSchema", "DropTable", "RenameColumn", "RenameTable",
+		"ALTER TABLE DROP", "DELETE FROM", "DROP COLUMN", "DROP DATABASE", "DROP SCHEMA",
+		"DROP TABLE", "DROP VIEW", "TRUNCATE",
+	}},
 	{class: ConsequenceIdentityRights, patterns: []string{
 		"aws_iam_*",
 		"azuread_administrative_unit_member",
@@ -340,6 +349,9 @@ func span(start, count string) []int {
 // type of the block it sits in, and a catalogued type adds its class with
 // that side's path and the type. In a pipeline definition a line's
 // pipelineIdentity mark adds pipeline_identity with the path and the mark.
+// In an EF Core migration or a .sql file only added lines are read, at head:
+// each destructiveOperations operation on one adds destructive_migration with
+// the path and the operation, and the merge base is never read for them.
 // A changed line that sets variable X (an assignment in a .tfvars file, or a
 // line in a variable "X" block's attributes other than description) adds the
 // classes of the catalogued blocks in that directory's .tf files, at the same
@@ -373,7 +385,7 @@ func collectConsequences(ctx context.Context, repo, mergeBase, head string, file
 		if len(new) > 0 && readable(f.Path) {
 			heads = append(heads, side{f.Path, new})
 		}
-		if len(old) > 0 && readable(oldPath) {
+		if len(old) > 0 && readable(oldPath) && !readsDestructive(oldPath) {
 			bases = append(bases, side{oldPath, old})
 		}
 	}
@@ -424,6 +436,17 @@ func collectConsequences(ctx context.Context, repo, mergeBase, head string, file
 		}
 		err = catBlobs(ctx, repo, blobs, func(p string, content []byte) {
 			content = bytes.TrimSuffix(content, []byte("\n"))
+			if readsDestructive(p) {
+				ops := destructiveOperations(p, content)
+				for _, n := range want[p] {
+					if n >= 1 && n <= len(ops) {
+						for _, op := range ops[n-1] {
+							hit(ConsequenceDestructiveMigration, p, op)
+						}
+					}
+				}
+				return
+			}
 			if isTfvars(p) {
 				names := tfvarsAssignments(content)
 				for _, n := range want[p] {
@@ -517,7 +540,9 @@ func isTerraform(p string) bool { return strings.HasSuffix(p, ".tf") }
 func isTfvars(p string) bool { return strings.HasSuffix(p, ".tfvars") }
 
 // readable reports whether collectConsequences reads a path.
-func readable(p string) bool { return isTerraform(p) || isTfvars(p) || isPipeline(p) }
+func readable(p string) bool {
+	return isTerraform(p) || isTfvars(p) || isPipeline(p) || readsDestructive(p)
+}
 
 // plannedConsequences gives each class a planned path names that path, with
 // no types. Nil when no path names one.

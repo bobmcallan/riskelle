@@ -189,7 +189,7 @@ func TestIdentityRightsCatalog(t *testing.T) {
 			t.Errorf("attributeConsequencesOf(%q, %q) = %v, want %v", tt.typ, tt.attr, got, tt.want)
 		}
 	}
-	if !IsConsequence(ConsequenceIdentityRights) || !IsConsequence(ConsequencePipelineIdentity) || IsConsequence("root_access") {
+	if !IsConsequence(ConsequenceDestructiveMigration) || !IsConsequence(ConsequenceIdentityRights) || !IsConsequence(ConsequencePipelineIdentity) || IsConsequence("root_access") {
 		t.Error("IsConsequence does not match the catalog")
 	}
 }
@@ -215,7 +215,7 @@ func TestReadmeListsConsequences(t *testing.T) {
 	}
 	cons := section("### Consequences")
 	for _, c := range builtinConsequences {
-		names := append(append([]string{c.class}, c.patterns...), c.keys...)
+		names := append(append(append([]string{c.class}, c.patterns...), c.keys...), c.operations...)
 		for typ, attrs := range c.attributes {
 			names = append(names, typ)
 			for _, a := range attrs {
@@ -233,7 +233,7 @@ func TestReadmeListsConsequences(t *testing.T) {
 			t.Errorf("README Consequences does not list pipeline path `%s`", g)
 		}
 	}
-	for _, s := range []string{".tfvars", "variable", "description"} {
+	for _, s := range []string{".tfvars", "variable", "description", "**/Migrations/**/*.cs", ".sql", "migrationBuilder", "Down"} {
 		if !strings.Contains(cons, "`"+s+"`") {
 			t.Errorf("README Consequences does not name `%s`", s)
 		}

@@ -104,8 +104,8 @@ area's risk, not the developer's (see [Sensitive areas](#sensitive-areas)).
 A consequence is what a change *does*, read from its changed lines, not where
 it lands. riskelle finds each consequence class in a built-in, versioned
 catalog, mechanically and the same way every time, and records it in the facts
-as `"consequences"`: the class, the paths that triggered it and the block types
-or pipeline keys that did.
+as `"consequences"`: the class, the paths that triggered it and the block types,
+pipeline keys or destructive operations that did.
 
 Each class sets a **floor**: the reported level is the higher of the shape
 level (the total's own level, capped at Medium) and every consequence's floor. A floor never changes the total or any
@@ -140,6 +140,7 @@ or absolute glob are refused by name: a repo class can only raise the level.
 
 | Class | Floor | Read from |
 | --- | --- | --- |
+| `destructive_migration` | High | Added lines of an EF Core migration (`**/Migrations/**/*.cs`): the `migrationBuilder` calls `DeleteData`, `DropColumn`, `DropSchema`, `DropTable`, `RenameColumn`, `RenameTable`; added lines of a migration or a `.sql` file: `DROP TABLE`, `DROP COLUMN`, `DROP SCHEMA`, `DROP DATABASE`, `DROP VIEW`, `TRUNCATE`, `DELETE FROM`, `ALTER TABLE DROP` (`ALTER TABLE ... DROP`) |
 | `identity_rights` | Medium | `aws_iam_*`, `azuread_administrative_unit_member`, `azuread_app_role_assignment`, `azuread_application*`, `azuread_directory_role*`, `azuread_group_member`, `azuread_group_role_management_policy`, `azuread_service_principal*`, `azuredevops_*_permissions`, `azuredevops_branch_policy_*`, `azuredevops_check_*`, `azuredevops_environment*`, `azuredevops_group_membership`, `azuredevops_pipeline_authorization`, `azuredevops_resource_authorization`, `azuredevops_securityrole_assignment`, `azuredevops_serviceendpoint_*`, `azurerm_federated_identity_credential`, `azurerm_role_assignment`, `azurerm_role_definition`, `azurerm_user_assigned_identity`, `github_actions_*_oidc_subject_claim_customization_template`, `github_actions_*_permissions`, `github_actions_environment_*`, `github_branch_protection*`, `github_organization_ruleset`, `github_repository_collaborator*`, `github_repository_environment*`, `github_repository_ruleset`, `github_team_members`, `github_team_membership`, `github_team_repository`, `google_*_iam_*` (Terraform types, globs); `azuread_group` only in its `members` or `owners` attribute, reported as `azuread_group.members` or `azuread_group.owners` |
 | `pipeline_identity` | Medium | Pipeline definitions: keys `*serviceConnection`, `azureSubscription*`, `connectedServiceName*`, `environment` (on a job), `id-token: write`, `permissions: write-all`; in a definition that carries any of these, the references `resources.repositories.ref`, `extends.template`, `stages.template`, `jobs.template`, `steps.template` |
 
@@ -218,6 +219,41 @@ catalogued key, so it carries nothing.
   (`permissions: { id-token: write }`) and list-form variables
   (`- name: azureSubscription`) are not read, and an Azure `deployment` must be
   its list item's first key.
+
+**Destructive migrations.** `destructive_migration` is a change that drops,
+truncates, deletes or renames data: once it runs, the data is gone. Its types
+are the operations matched, as listed above.
+
+- A migration ships to every environment, so the floor is High everywhere: it
+  is not narrowed to production roots, and a root only adds its name.
+- Only added lines are read, at head: an altered line is an added line, and a
+  removed line or a deleted file carries nothing. Removing a destructive
+  statement makes a change safer.
+- An EF Core migration is a `.cs` file under a `Migrations` directory, and a
+  SQL file ends in `.sql` (both case-sensitive). Its `Down` method is not read:
+  `Down` is the rollback, and scaffolding writes a drop there for every
+  additive migration. `Down` runs from its `void Down(` line to the first later
+  line that is only `}` at that line's indent or less; a one-line `Down` (a
+  line ending in `}` or `;`) covers only itself. Code after it, helpers
+  included, is read.
+- A builder call counts on the call's own line, on a parameter named
+  `migrationBuilder` (`migrationBuilder.DropColumn(`), matched case-sensitively.
+  `AddColumn`, `CreateTable`, `DropIndex` and `DropForeignKey` carry nothing.
+- SQL statements count in a `.sql` file and on every read line of a migration
+  (the SQL of `migrationBuilder.Sql(...)` often sits on later lines of a
+  multi-line string), case-insensitively, with the keywords on one line.
+  `TRUNCATE` counts only when not followed by `(`, so `Math.Truncate(x)` and
+  MySQL's `TRUNCATE(x, d)` do not. `ALTER TABLE ... DROP` counts on any line
+  of the statement that carries `DROP`, up to the statement's `;` or a blank
+  line, so `ALTER TABLE t` then `DROP CONSTRAINT c;` counts;
+  `ALTER TABLE t DROP COLUMN c;` reports both `ALTER TABLE DROP` and
+  `DROP COLUMN`.
+- Comments are never read: `/* */` (across lines) and `--` to the end of the
+  line in both kinds of file, and `//` to the end of the line in a migration.
+- It is a line walk, not a C# or SQL parser: quoted text is read as SQL, a
+  comment marker inside a string starts a comment, and a builder under another
+  name is not read. SQL renames (`sp_rename`, `RENAME TO`) and other migration
+  frameworks are not read.
 
 ### Test files
 
@@ -385,7 +421,9 @@ a JSON plan file that predicts the change:
 - `consequences` (optional, per file): the consequence classes the path is
   expected to carry, such as `{"path": "iam/roles.tf", "added": 20,
   "consequences": ["identity_rights"]}` or `{"path": "pipelines/release.yml",
-  "added": 40, "consequences": ["pipeline_identity"]}`; see
+  "added": 40, "consequences": ["pipeline_identity"]}` or
+  `{"path": "db/migrations/002_drop.sql", "added": 3, "consequences":
+  ["destructive_migration"]}`; see
   [Consequences](#consequences). An
   unknown class, or one listed twice for a path, is refused by name. It names
   built-in classes only: a repo class is found from the planned path, by the
