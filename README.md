@@ -144,7 +144,7 @@ or absolute glob are refused by name: a repo class can only raise the level.
 
 | Class | Floor | Read from |
 | --- | --- | --- |
-| `access_widened` | High | A line added at head that carries `identity_rights`: a grant added or altered, a variable it uses included; the same paths and types |
+| `access_widened` | High | A line added at head that carries `identity_rights`: a grant added or altered, a variable it uses included; the same paths and types. Never a removed line, a `description` or `display_name` label, or a line that changed only in whitespace or a comment |
 | `definition_write` | High | Added lines of any text file but docs: a logical shell command that is `az devops invoke` with `--area release` or `build` and an `--http-method` of `PUT`, `POST`, `PATCH` or `DELETE`; `az pipelines` or `az pipelines release` directly followed by `create`, `update` or `delete`; or `curl`, `az rest` or `Invoke-RestMethod` with a write method against a URL containing `_apis/release/definitions` or `_apis/build/definitions` |
 | `destructive_migration` | High | Added lines of an EF Core migration (`**/Migrations/**/*.cs`): the `migrationBuilder` calls `DeleteData`, `DropColumn`, `DropSchema`, `DropTable`, `RenameColumn`, `RenameTable`; added lines of a migration or a `.sql` file: `DROP TABLE`, `DROP COLUMN`, `DROP SCHEMA`, `DROP DATABASE`, `DROP VIEW`, `TRUNCATE`, `DELETE FROM`, `ALTER TABLE DROP` (`ALTER TABLE ... DROP`) |
 | `identity_rights` | Medium | `aws_iam_*`, `azuread_administrative_unit_member`, `azuread_app_role_assignment`, `azuread_application*`, `azuread_directory_role*`, `azuread_group_member`, `azuread_group_role_management_policy`, `azuread_service_principal*`, `azuredevops_*_permissions`, `azuredevops_branch_policy_*`, `azuredevops_check_*`, `azuredevops_environment*`, `azuredevops_group_membership`, `azuredevops_pipeline_authorization`, `azuredevops_resource_authorization`, `azuredevops_securityrole_assignment`, `azuredevops_serviceendpoint_*`, `azurerm_federated_identity_credential`, `azurerm_role_assignment`, `azurerm_role_definition`, `azurerm_user_assigned_identity`, `github_actions_*_oidc_subject_claim_customization_template`, `github_actions_*_permissions`, `github_actions_environment_*`, `github_branch_protection*`, `github_organization_ruleset`, `github_repository_collaborator*`, `github_repository_environment*`, `github_repository_ruleset`, `github_team_members`, `github_team_membership`, `github_team_repository`, `google_*_iam_*` (Terraform types, globs); `azuread_group` only in its `members` or `owners` attribute, reported as `azuread_group.members` or `azuread_group.owners` |
@@ -191,9 +191,24 @@ or absolute glob are refused by name: a repo class can only raise the level.
   same path and type, `<type> via var.X` included: a grant added or altered
   makes the change High. A change whose `identity_rights` lines are all
   removed ones (a grant, a member or a `.tfvars` assignment removed) carries
-  `identity_rights` alone and stays Medium. Any added line in a catalogued
-  block counts, and what the value grants is not read, so removing a
-  restricting line (a condition or a deny) is a removed line and stays Medium.
+  `identity_rights` alone and stays Medium. Any other added line in a
+  catalogued block counts, and what the value grants is not read, so removing
+  a restricting line (a condition or a deny) is a removed line and stays
+  Medium.
+- A label does not widen. A line in a block's `description` or `display_name`
+  attribute, and a variable used only there, carries `identity_rights` but
+  never `access_widened`: it says what the block is for, not what it grants.
+  `display_name` is no label where it decides access: in a `data` block it
+  selects the object read (which principal a grant targets), and in
+  `azuread_directory_role` it names the role.
+- A restyle is not a change. In a `.tf` or `.tfvars` file, a removed line and
+  a later added line of the same hunk that differ only in whitespace outside
+  a string or in a trailing `#` or `//` comment are the same line, as when
+  `terraform fmt` realigns an assignment: neither counts at either side. A
+  blank line and a full-line comment carry nothing. Two limits: a heredoc
+  body line is compared the same way, so a whitespace or trailing-`#` change
+  inside a script heredoc counts as no change; and a line inside a
+  multi-line `/* */` comment is read as code.
 - Blocks are found by their header at column 0, as `terraform fmt` writes every
   file; a heredoc body (such as a JSON policy) belongs to its block wherever it
   starts. A file that is not formatted may be misread.

@@ -33,7 +33,7 @@ const (
 // kept. Both lists are sorted,
 // distinct and non-nil; Types is empty for a plan, which has no content.
 // access_widened carries the paths and types of the identity_rights lines
-// added at head that carried it.
+// added at head that carried it, less those in a label attribute.
 type Consequence struct {
 	Class string   `json:"class"`
 	Paths []string `json:"paths"`
@@ -55,7 +55,9 @@ type Consequence struct {
 //
 // access_widened has no patterns of its own: a line added at head that
 // carries identity_rights (a grant added or altered, a variable it uses
-// included) carries access_widened too, with the same path and type.
+// included) carries access_widened too, with the same path and type. Its
+// labels are the top-level attributes that say what a block is for, not what
+// it grants: a line in one carries identity_rights but never access_widened.
 //
 // definition_write is a script that writes a release or build definition out
 // of band: reverting the merge does not undo a write already made.
@@ -79,10 +81,11 @@ var builtinConsequences = []struct {
 	operations []string            // the operation types destructiveOperations reports
 	attributes map[string][]string // exact type: the top-level attributes whose lines carry the class
 	widens     string              // the class this one accompanies on a line added at head
+	labels     []string            // the top-level attributes on whose lines a widening class does not accompany
 	removed    []string            // resource types whose block removed from its directory carries the class
 	secrets    []secretRule        // the rules whose match on a line added at head carries the class
 }{
-	{class: ConsequenceAccessWidened, widens: ConsequenceIdentityRights},
+	{class: ConsequenceAccessWidened, widens: ConsequenceIdentityRights, labels: []string{"description", "display_name"}},
 	{class: ConsequenceDefinitionWrite, commands: []string{
 		"az devops invoke", "az pipelines", "az pipelines release", "az rest", "curl", "Invoke-RestMethod",
 	}},
@@ -199,6 +202,81 @@ func widenedBy(class string) []string {
 	return out
 }
 
+// label reports whether l falls in a label attribute of a widening class: a
+// class read on it is recorded, but not the class that widens it.
+// display_name is no label where it decides access: in a data block it
+// selects the object read (which principal a grant targets), and in
+// azuread_directory_role it names the role activated.
+func label(l tfLine) bool {
+	if l.attr == "" || l.attr == "display_name" && (l.data || l.block == "azuread_directory_role") {
+		return false
+	}
+	for _, c := range builtinConsequences {
+		if c.widens != "" && slices.Contains(c.labels, l.attr) {
+			return true
+		}
+	}
+	return false
+}
+
+// hclComment reports whether a line, less its leading whitespace, is a
+// full-line comment.
+func hclComment(trimmed string) bool {
+	return strings.HasPrefix(trimmed, "#") || strings.HasPrefix(trimmed, "//") || strings.HasPrefix(trimmed, "/*")
+}
+
+// hclText returns a line of Terraform as its tokens alone: less every
+// whitespace character outside a quoted string and less a trailing "#" or
+// "//" comment outside one. Two lines with the same text differ only in
+// style, as terraform fmt realigns them. A string is scanned with its "\"
+// escapes and its "${" and "%{" templates, whose braces are counted and in
+// which a quote opens a nested string, so whitespace or a "#" inside any
+// string is kept.
+func hclText(line string) string {
+	var b strings.Builder
+	var templates []int // the open-brace count of each open template
+	inString := false
+	for i := 0; i < len(line); i++ {
+		c := line[i]
+		next := byte(0)
+		if i+1 < len(line) {
+			next = line[i+1]
+		}
+		if inString {
+			b.WriteByte(c)
+			switch {
+			case c == '\\' && next != 0, (c == '$' || c == '%') && next == c:
+				b.WriteByte(next)
+				i++
+			case c == '"':
+				inString = false
+			case (c == '$' || c == '%') && next == '{':
+				b.WriteByte(next)
+				i++
+				templates, inString = append(templates, 0), false
+			}
+			continue
+		}
+		last := len(templates) - 1
+		switch {
+		case c == ' ' || c == '\t' || c == '\r':
+			continue
+		case c == '#' || c == '/' && next == '/':
+			return b.String()
+		case c == '"':
+			inString = true
+		case c == '{' && last >= 0:
+			templates[last]++
+		case c == '}' && last >= 0 && templates[last] > 0:
+			templates[last]--
+		case c == '}' && last >= 0:
+			templates, inString = templates[:last], true
+		}
+		b.WriteByte(c)
+	}
+	return b.String()
+}
+
 // attributeConsequencesOf returns the classes a line in attr of a block of
 // type typ carries by the catalog's attributes; nil when attr is "".
 func attributeConsequencesOf(typ, attr string) []string {
@@ -250,8 +328,7 @@ func tfvarsAssignments(content []byte) []string {
 				heredoc = ""
 			}
 			continue
-		case strings.TrimSpace(l) == "" || strings.HasPrefix(strings.TrimSpace(l), "#") ||
-			strings.HasPrefix(strings.TrimSpace(l), "//") || strings.HasPrefix(strings.TrimSpace(l), "/*"):
+		case strings.TrimSpace(l) == "" || hclComment(strings.TrimSpace(l)):
 		case l[0] == ' ' || l[0] == '\t':
 			out[i] = open
 		case strings.ContainsAny(l[:1], "])}"):
@@ -274,8 +351,7 @@ func tfvarsAssignments(content []byte) []string {
 // var.<name> as a whole identifier: not preceded by an identifier character
 // or ".", nor followed by an identifier character.
 func refersTo(line, name string) bool {
-	t := strings.TrimSpace(line)
-	if strings.HasPrefix(t, "#") || strings.HasPrefix(t, "//") || strings.HasPrefix(t, "/*") {
+	if hclComment(strings.TrimSpace(line)) {
 		return false
 	}
 	ref := "var." + name
@@ -297,7 +373,7 @@ func refersTo(line, name string) bool {
 }
 
 // blockHeader matches a resource or data block header at column 0.
-var blockHeader = regexp.MustCompile(`^(?:resource|data)[ \t]+"?([A-Za-z][A-Za-z0-9_-]*)"?`)
+var blockHeader = regexp.MustCompile(`^(resource|data)[ \t]+"?([A-Za-z][A-Za-z0-9_-]*)"?`)
 
 // tfLine is one line of a Terraform file: the resource or data type of the
 // top-level block it belongs to, and the block's top-level attribute it falls
@@ -305,8 +381,14 @@ var blockHeader = regexp.MustCompile(`^(?:resource|data)[ \t]+"?([A-Za-z][A-Za-z
 // belongs to, whose attributes are tracked the same way; "" otherwise.
 // address is "type.name" on the header line of a resource block only. gone
 // is "moved" or "removed" on every line of a column-0 moved or removed block,
-// whose attributes are tracked as a variable block's are; "" otherwise.
-type tfLine struct{ block, attr, variable, address, gone string }
+// whose attributes are tracked as a variable block's are; "" otherwise. data
+// is set on every line of a data block. inert is set on a blank line and on a
+// full-line comment outside a heredoc body: it changes nothing, so it carries
+// no class and sets no variable.
+type tfLine struct {
+	block, attr, variable, address, gone string
+	data, inert                          bool
+}
 
 // tfAttr matches the identifier that opens a top-level attribute line.
 var tfAttr = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_-]*`)
@@ -331,8 +413,8 @@ var tfAttr = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_-]*`)
 func terraformBlocks(content []byte) []tfLine {
 	lines := strings.Split(string(content), "\n")
 	out := make([]tfLine, len(lines))
-	open, vname, gone, heredoc, attr, col := "", "", "", "", "", -1
-	line := func(a string) tfLine { return tfLine{block: open, attr: a, variable: vname, gone: gone} }
+	open, vname, gone, heredoc, attr, col, data := "", "", "", "", "", -1, false
+	line := func(a string) tfLine { return tfLine{block: open, attr: a, variable: vname, gone: gone, data: data} }
 	for i, l := range lines {
 		trimmed := strings.TrimLeft(l, " \t")
 		switch {
@@ -342,8 +424,9 @@ func terraformBlocks(content []byte) []tfLine {
 				heredoc = ""
 			}
 			continue
-		case strings.TrimSpace(l) == "" || strings.HasPrefix(l, "#") || strings.HasPrefix(l, "//") || strings.HasPrefix(l, "/*"):
+		case strings.TrimSpace(l) == "" || hclComment(l):
 			out[i] = line("")
+			out[i].inert = true
 		case l[0] == ' ' || l[0] == '\t':
 			indent := len(l) - len(trimmed)
 			if col < 0 {
@@ -363,13 +446,14 @@ func terraformBlocks(content []byte) []tfLine {
 				attr = ""
 			}
 			out[i] = line(attr)
+			out[i].inert = hclComment(trimmed)
 		case l[0] == '}':
 			out[i] = line("")
-			open, vname, gone, attr, col = "", "", "", "", -1
+			open, vname, gone, attr, col, data = "", "", "", "", -1, false
 		default:
-			open, vname, gone, attr, col = "", "", "", "", -1
+			open, vname, gone, attr, col, data = "", "", "", "", -1, false
 			if m := blockHeader.FindStringSubmatch(l); m != nil {
-				open = m[1]
+				open, data = m[2], m[1] == "data"
 			} else if m := variableHeader.FindStringSubmatch(l); m != nil {
 				vname = m[1]
 			} else if m := goneHeader.FindStringSubmatch(l); m != nil {
@@ -380,7 +464,7 @@ func terraformBlocks(content []byte) []tfLine {
 				out[i].address = m[1] + "." + m[2]
 			}
 			if strings.HasSuffix(strings.TrimRight(l, " \t\r"), "}") {
-				open, vname, gone = "", "", "" // a one-line block
+				open, vname, gone, data = "", "", "", false // a one-line block
 			}
 		}
 		if m := heredocStart.FindStringSubmatch(l); m != nil {
@@ -427,21 +511,78 @@ func span(start, count string) []int {
 	return out
 }
 
+// restyledLines returns the old-side and new-side line numbers of a -U0
+// Terraform patch whose change is style alone: within one hunk, a removed
+// line and a later added line with the same hclText, matched in order (each
+// removed line takes the first such added line after the last match). A line
+// moved past another match, or to another hunk, stays a change; a line with
+// no text (blank or a comment) is never matched. A hunk's content lines are
+// counted off by its header, so none is taken for a header.
+func restyledLines(patch []byte) (old, new map[int]bool) {
+	old, new = map[int]bool{}, map[int]bool{}
+	lines := strings.Split(string(patch), "\n")
+	for i := 0; i < len(lines); i++ {
+		m := hunkHeader.FindStringSubmatch(lines[i])
+		if m == nil {
+			continue
+		}
+		removedAt, addedAt := span(m[1], m[2]), span(m[3], m[4])
+		var removed, added []string
+		for i+1 < len(lines) && len(removed)+len(added) < len(removedAt)+len(addedAt) {
+			i++
+			switch l := lines[i]; {
+			case strings.HasPrefix(l, "-") && len(removed) < len(removedAt):
+				removed = append(removed, hclText(l[1:]))
+			case strings.HasPrefix(l, "+"):
+				added = append(added, hclText(l[1:]))
+			}
+		}
+		from := 0
+		for r, text := range removed {
+			for a := from; text != "" && a < len(added); a++ {
+				if added[a] == text {
+					old[removedAt[r]], new[addedAt[a]] = true, true
+					from = a + 1
+					break
+				}
+			}
+		}
+	}
+	return old, new
+}
+
+// less returns lines without those in drop.
+func less(lines []int, drop map[int]bool) []int {
+	out := lines[:0]
+	for _, n := range lines {
+		if !drop[n] {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
 // changedLines returns the old-side and new-side line numbers of f's
 // merge-base..head -U0 diff, a rename diffed across its two paths.
 func changedLines(ctx context.Context, repo, mergeBase, head string, f File) (old, new []int, err error) {
+	patch, err := filePatch(ctx, repo, mergeBase, head, f)
+	if err != nil {
+		return nil, nil, err
+	}
+	old, new = hunkLines(patch)
+	return old, new, nil
+}
+
+// filePatch returns f's merge-base..head -U0 diff, a rename diffed across its
+// two paths.
+func filePatch(ctx context.Context, repo, mergeBase, head string, f File) ([]byte, error) {
 	args := []string{"--literal-pathspecs", "--attr-source=" + head, "diff", "-U0"}
 	args = append(args, pinnedDiff...)
 	args = append(args, mergeBase, head, "--")
 	if f.OldPath != "" {
 		args = append(args, f.OldPath)
 	}
-	patch, err := git(ctx, repo, append(args, f.Path)...)
-	if err != nil {
-		return nil, nil, err
-	}
-	old, new = hunkLines(patch)
-	return old, new, nil
+	return git(ctx, repo, append(args, f.Path)...)
 }
 
 // collectConsequences finds the consequence classes in the .tf files and
@@ -463,7 +604,10 @@ func changedLines(ctx context.Context, repo, mergeBase, head string, f File) (ol
 // A class read on a line added at head (an altered line is one removed and
 // one added) also adds each class that widens it, access_widened for
 // identity_rights, with the same path and type; the merge-base side adds
-// none. A catalogued resource block whose address leaves its directory adds
+// none, and neither does a line in a label attribute (label). In a .tf or
+// .tfvars file a restyled line (restyledLines) is not a changed line at
+// either side, and an inert one (blank or a full-line comment) carries no
+// class and sets no variable. A catalogued resource block whose address leaves its directory adds
 // its removal classes, stateful_destroy, with its merge-base path and type
 // (removedBlocks). Every other text file is read only for secret_added: a
 // line added at head that matches a secret rule adds it with the path and the
@@ -486,13 +630,18 @@ func collectConsequences(ctx context.Context, repo, mergeBase, head string, file
 		if f.Binary || !(readable(f.Path) || readable(f.OldPath) || script) {
 			continue
 		}
-		old, new, err := changedLines(ctx, repo, mergeBase, head, f)
+		patch, err := filePatch(ctx, repo, mergeBase, head, f)
 		if err != nil {
 			return nil, err
 		}
+		old, new := hunkLines(patch)
 		oldPath := f.Path
 		if f.OldPath != "" {
 			oldPath = f.OldPath
+		}
+		if hcl := func(p string) bool { return isTerraform(p) || isTfvars(p) }; hcl(f.Path) || hcl(oldPath) {
+			restyledOld, restyledNew := restyledLines(patch)
+			old, new = less(old, restyledOld), less(new, restyledNew)
 		}
 		if len(new) > 0 && (readable(f.Path) || script) {
 			heads = append(heads, side{f.Path, new, i})
@@ -538,9 +687,11 @@ func collectConsequences(ctx context.Context, repo, mergeBase, head string, file
 				blobs = append(blobs, b)
 			}
 		}
-		hit := func(class, p, typ string) {
+		// widen is false for a line that cannot widen its class: one at the
+		// merge base, or in a label attribute.
+		hit := func(class, p, typ string, widen bool) {
 			record(class, p, typ)
-			if at.added {
+			if widen {
 				for _, w := range widenedBy(class) {
 					record(w, p, typ)
 				}
@@ -565,7 +716,7 @@ func collectConsequences(ctx context.Context, repo, mergeBase, head string, file
 				writes := definitionWrites(content)
 				for _, n := range want[p] {
 					if n >= 1 && n <= len(writes) && writes[n-1] != "" {
-						hit(ConsequenceDefinitionWrite, p, writes[n-1])
+						hit(ConsequenceDefinitionWrite, p, writes[n-1], at.added)
 					}
 				}
 			}
@@ -574,7 +725,7 @@ func collectConsequences(ctx context.Context, repo, mergeBase, head string, file
 				for _, n := range want[p] {
 					if n >= 1 && n <= len(ops) {
 						for _, op := range ops[n-1] {
-							hit(ConsequenceDestructiveMigration, p, op)
+							hit(ConsequenceDestructiveMigration, p, op, at.added)
 						}
 					}
 				}
@@ -602,7 +753,7 @@ func collectConsequences(ctx context.Context, repo, mergeBase, head string, file
 				}
 				for _, n := range want[p] {
 					if n >= 1 && n <= len(marks) && marks[n-1] != "" {
-						hit(ConsequencePipelineIdentity, p, marks[n-1])
+						hit(ConsequencePipelineIdentity, p, marks[n-1], at.added)
 					}
 				}
 				return
@@ -612,18 +763,22 @@ func collectConsequences(ctx context.Context, repo, mergeBase, head string, file
 				if n < 1 || n > len(lines) {
 					continue
 				}
-				if v := lines[n-1]; v.variable != "" && v.attr != "" && v.attr != "description" {
-					setVar(p, v.variable)
-				}
-				if lines[n-1].block == "" {
+				l := lines[n-1]
+				if l.inert {
 					continue
 				}
-				l := lines[n-1]
+				if l.variable != "" && l.attr != "" && l.attr != "description" {
+					setVar(p, l.variable)
+				}
+				if l.block == "" {
+					continue
+				}
+				widen := at.added && !label(l)
 				for _, class := range consequencesOf(l.block) {
-					hit(class, p, l.block)
+					hit(class, p, l.block, widen)
 				}
 				for _, class := range attributeConsequencesOf(l.block, l.attr) {
-					hit(class, p, l.block+"."+l.attr)
+					hit(class, p, l.block+"."+l.attr, widen)
 				}
 			}
 		})
@@ -649,12 +804,13 @@ func collectConsequences(ctx context.Context, repo, mergeBase, head string, file
 					if l.block == "" || !refersTo(text[i], name) {
 						continue
 					}
+					widen := at.added && !label(l)
 					for cp := range changed {
 						for _, class := range consequencesOf(l.block) {
-							hit(class, cp, l.block+" via var."+name)
+							hit(class, cp, l.block+" via var."+name, widen)
 						}
 						for _, class := range attributeConsequencesOf(l.block, l.attr) {
-							hit(class, cp, l.block+"."+l.attr+" via var."+name)
+							hit(class, cp, l.block+"."+l.attr+" via var."+name, widen)
 						}
 					}
 				}

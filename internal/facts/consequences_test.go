@@ -3,6 +3,7 @@ package facts
 import (
 	"os"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -44,6 +45,165 @@ func TestTerraformBlocks(t *testing.T) {
 	for n, attr := range map[int]string{2: "scope", 7: "policy", 8: "policy", 9: "policy", 15: ""} {
 		if lines[n-1].attr != attr {
 			t.Errorf("line %d attr %q, want %q", n, lines[n-1].attr, attr)
+		}
+	}
+}
+
+// TestTerraformInertAndData pins the lines that change nothing (blank lines
+// and full-line comments, at column 0 or indented, but never a heredoc body
+// line) and the lines of a data block.
+func TestTerraformInertAndData(t *testing.T) {
+	src := []struct {
+		line        string
+		inert, data bool
+	}{
+		{`# above`, true, false},
+		{`resource "azuredevops_check_approval" "a" {`, false, false},
+		{`  # the approvers`, true, false},
+		{`  approvers = [1] # trailing`, false, false},
+		{``, true, false},
+		{`// column 0, inside`, true, false},
+		{`  /* block */`, true, false},
+		{`  instructions = <<EOT`, false, false},
+		{`# a heredoc body line`, false, false},
+		{``, false, false},
+		{`EOT`, false, false},
+		{`}`, false, false},
+		{`data "azuread_service_principal" "sp" {`, false, true},
+		{`  display_name = "x"`, false, true},
+		{`  # which one`, true, true},
+		{`}`, false, true},
+		{`resource "aws_iam_role" "r" {`, false, false},
+		{`}`, false, false},
+	}
+	var text []string
+	for _, l := range src {
+		text = append(text, l.line)
+	}
+	lines := terraformBlocks([]byte(strings.Join(text, "\n")))
+	for i, l := range src {
+		if lines[i].inert != l.inert || lines[i].data != l.data {
+			t.Errorf("line %d %q: inert %v data %v, want %v %v", i+1, l.line, lines[i].inert, lines[i].data, l.inert, l.data)
+		}
+	}
+}
+
+// TestHCLText pins what two lines must share to differ in style alone:
+// whitespace outside a string and a trailing comment are dropped; anything
+// inside a string, a template's nested string included, is kept.
+func TestHCLText(t *testing.T) {
+	for _, tt := range []struct {
+		a, b string
+		same bool
+	}{
+		{`a = 1`, `a=1`, true},
+		{`ref    = "refs/heads/main" # must match`, `ref = "refs/heads/main"                      # must match`, true},
+		{`a = 1 # one`, `a = 1 // another`, true},
+		{`a = 1 # one`, `a = 1`, true},
+		{"\ta = [1,2]\r", `a = [ 1, 2 ]`, true},
+		{`a = 1`, `a = 2`, false},
+		{`a = "x  y"`, `a = "x y"`, false},
+		{`a = "x # y"`, `a = "x # z"`, false},
+		{`a = "x // y"`, `a = "x"`, false},
+		{`a = "${f("#x")}"`, `a = "${f("#y")}"`, false},
+		{`a = "${ f( "x" ) }"`, `a = "${f("x")}"`, true},
+		{`a = "${ {k = "v"}["k"] } z"`, `a = "${{k="v"}["k"]} z"`, true},
+		{`a = "${x} y"`, `a = "${x}  y"`, false},
+		{`a = "q\" # r"`, `a = "q\" # s"`, false},
+		{`a = "$${x} # y"`, `a = "$${x} # z"`, false},
+		{`a = "%{if x} y%{endif}"`, `a = "%{ if x } y%{ endif }"`, true},
+		{`# one`, `# two`, true},
+	} {
+		if got := hclText(tt.a) == hclText(tt.b); got != tt.same {
+			t.Errorf("hclText(%q) == hclText(%q) is %v, want %v (%q, %q)", tt.a, tt.b, got, tt.same, hclText(tt.a), hclText(tt.b))
+		}
+	}
+	if got := hclText(`  # only a comment`); got != "" {
+		t.Errorf("hclText of a comment = %q, want empty", got)
+	}
+}
+
+// TestRestyledLines pins the lines of a hunk that changed in style alone.
+func TestRestyledLines(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		patch    []string
+		old, new []int
+	}{
+		{"a variable removed and the next assignment realigned", []string{
+			"diff --git a/terraform.tfvars b/terraform.tfvars",
+			"--- a/terraform.tfvars",
+			"+++ b/terraform.tfvars",
+			`@@ -13,2 +13 @@ subscription = "s"`,
+			`-release_approver        = "owner@example.com"`,
+			`-release_template_ref    = "refs/heads/main" # must match`,
+			`+release_template_ref    = "refs/heads/main"                      # must match`,
+		}, []int{14}, []int{13}},
+		{"a value changed beside a realignment", []string{
+			"@@ -13 +13 @@",
+			`-release_template_ref    = "refs/heads/main" # must match`,
+			`+release_template_ref    = "refs/heads/release"                   # must match`,
+		}, nil, nil},
+		{"two lines swapped: one pair matches, in order", []string{
+			"@@ -1,2 +1,2 @@",
+			"-a = 1",
+			"-b = 2",
+			"+b  = 2",
+			"+a  = 1",
+		}, []int{1}, []int{2}},
+		{"content that looks like a header, comments never matched, no pairing across hunks", []string{
+			"@@ -3,3 +3,2 @@",
+			"--- x = 1",
+			"-# one",
+			"-",
+			"+# two",
+			"+c = 3",
+			`\ No newline at end of file`,
+			"@@ -9 +8,0 @@",
+			"-c = 3",
+			"@@ -20 +19 @@",
+			"-d   = 4",
+			"+d = 4",
+		}, []int{20}, []int{19}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			old, new := restyledLines([]byte(strings.Join(tt.patch, "\n")))
+			for _, side := range []struct {
+				name string
+				got  map[int]bool
+				want []int
+			}{{"old", old, tt.old}, {"new", new, tt.new}} {
+				var nums []int
+				for n := range side.got {
+					nums = append(nums, n)
+				}
+				sort.Ints(nums)
+				if !reflect.DeepEqual(nums, side.want) {
+					t.Errorf("%s = %v, want %v", side.name, nums, side.want)
+				}
+			}
+		})
+	}
+}
+
+// TestLabel pins the attributes whose lines never widen a class: description
+// everywhere, display_name except where it selects what a grant targets.
+func TestLabel(t *testing.T) {
+	for _, tt := range []struct {
+		l    tfLine
+		want bool
+	}{
+		{tfLine{block: "azuredevops_environment", attr: "description"}, true},
+		{tfLine{block: "azuread_application", attr: "display_name"}, true},
+		{tfLine{block: "azuread_service_principal", attr: "description", data: true}, true},
+		{tfLine{block: "azuread_service_principal", attr: "display_name", data: true}, false},
+		{tfLine{block: "azuread_directory_role", attr: "display_name"}, false},
+		{tfLine{block: "azuredevops_check_approval", attr: "approvers"}, false},
+		{tfLine{block: "azuredevops_environment", attr: "name"}, false},
+		{tfLine{block: "azuredevops_environment"}, false},
+	} {
+		if got := label(tt.l); got != tt.want {
+			t.Errorf("label(%+v) = %v, want %v", tt.l, got, tt.want)
 		}
 	}
 }
