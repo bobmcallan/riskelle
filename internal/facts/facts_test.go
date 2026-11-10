@@ -130,3 +130,13 @@ func TestFileJSONDeletedAndPackage(t *testing.T) {
 		t.Errorf("modified JSON = %s, want neither deleted nor package", kept)
 	}
 }
+
+func TestFileJSONReferrers(t *testing.T) {
+	gone, _ := json.Marshal(File{Path: "a.js", Removed: 1, Deleted: true, Referrers: []string{"README.md"}})
+	if want := `{"path":"a.js","added":0,"removed":1,"deleted":true,"referrers":["README.md"]}`; string(gone) != want {
+		t.Errorf("deleted JSON = %s, want %s", gone, want)
+	}
+	if plain, _ := json.Marshal(File{Path: "a.js", Removed: 1, Deleted: true}); strings.Contains(string(plain), "referrers") {
+		t.Errorf("JSON without referrers = %s, want no referrers key", plain)
+	}
+}

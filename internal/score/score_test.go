@@ -823,6 +823,10 @@ func TestDeletedFileNothingDependsOn(t *testing.T) {
 	js := facts.File{Path: "old/a.js", Removed: 300, Deleted: true}
 	gone := facts.File{Path: "core/old.go", Removed: 300, Deleted: true, Package: "example.com/m/core"}
 	modified := facts.File{Path: "old/a.js", Removed: 300}
+	refs := func(f facts.File, paths ...string) facts.File {
+		f.Referrers = paths
+		return f
+	}
 	files := func(name string, n int) facts.Impact {
 		return facts.Impact{Packages: []facts.Dependency{}, Files: []facts.Dependency{{Name: name, Dependents: n}}}
 	}
@@ -842,6 +846,15 @@ func TestDeletedFileNothingDependsOn(t *testing.T) {
 		{"deleted Go file, only a file entry 0", gone, files("core/old.go", 0), false},
 		{"deleted, no impact entry", js, files("other.js", 0), false},
 		{"modified, file entry 0", modified, files("old/a.js", 0), false},
+		// Referrers: a deleted file only docs refer to is left out; any other
+		// referrer, a short list, a Go package or a modified file counts.
+		{"deleted, README and ticket note refer", refs(js, "README.md", "tickets/ID-1/CHANGE.md"), files("old/a.js", 2), true},
+		{"deleted, docs/agents.md refers", refs(js, "docs/agents.md"), files("old/a.js", 1), true},
+		{"deleted, a doc and a config refer", refs(js, "agent/review.toml", "docs/agents.md"), files("old/a.js", 2), false},
+		{"deleted, a doc and code refer", refs(js, "README.md", "app/index.js"), files("old/a.js", 2), false},
+		{"deleted, referrers short of dependents", refs(js, "README.md"), files("old/a.js", 2), false},
+		{"deleted Go file, README refers, package entry 1", refs(gone, "README.md"), pkgs("example.com/m/core", 1), false},
+		{"modified, README refers, file entry 1", refs(modified, "README.md"), files("old/a.js", 1), false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

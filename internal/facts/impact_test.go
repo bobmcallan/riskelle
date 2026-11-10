@@ -266,3 +266,22 @@ func TestScanPackages(t *testing.T) {
 		t.Errorf("packages = %v, want %v", got, want)
 	}
 }
+
+// TestScanFileReferrers pins that fileReferrers names, sorted, the paths that
+// refer to each changed file, and nothing for a package path or a file nothing
+// names.
+func TestScanFileReferrers(t *testing.T) {
+	s := newScan([]string{"core/old.go", "web/old.js", "web/lone.js"})
+	for _, f := range [][2]string{
+		{"go.mod", "module example.com/m\n"},
+		{"core/keep.go", goFile("core")},
+		{"README.md", "core/old.go and web/old.js are removed\n"},
+		{"app/x.js", "require('../web/old.js')\n"},
+	} {
+		s.add(f[0], []byte(f[1]))
+	}
+	want := map[string][]string{"web/old.js": {"README.md", "app/x.js"}}
+	if got := s.fileReferrers(); !reflect.DeepEqual(got, want) {
+		t.Errorf("fileReferrers = %v, want %v", got, want)
+	}
+}

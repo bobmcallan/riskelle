@@ -3,10 +3,15 @@
 package tests
 
 import (
+	"encoding/json"
+	"os/exec"
+	"path/filepath"
 	"reflect"
 	"sort"
 	"testing"
 
+	"github.com/bobmcallan/riskelle/internal/facts"
+	"github.com/bobmcallan/riskelle/internal/report"
 	"github.com/bobmcallan/riskelle/internal/score"
 )
 
@@ -100,12 +105,14 @@ func TestDeletedLegacyTreeScoresMedium(t *testing.T) {
 	}
 }
 
-// TestDeletedFileStillReferencedCounts: a deleted file something at head still
-// refers to counts in full in size, degree and tests.
+// TestDeletedFileStillReferencedCounts: a deleted file something at head
+// other than docs still refers to counts in full in size, degree and tests,
+// though a README names it too.
 func TestDeletedFileStillReferencedCounts(t *testing.T) {
 	dir := deletionFixture(t, map[string]string{
 		"lib/old.js":   numbered("export const old", 60),
 		"app/index.js": "require('lib/old.js')\n",
+		"README.md":    "lib/old.js is the old library\n",
 	}, "lib/old.js")
 
 	f, res, err := collectAndScore(t, dir)
@@ -115,8 +122,11 @@ func TestDeletedFileStillReferencedCounts(t *testing.T) {
 	if len(f.Files) != 1 || !f.Files[0].Deleted {
 		t.Fatalf("files %+v, want lib/old.js deleted", f.Files)
 	}
-	if len(f.Impact.Files) != 1 || f.Impact.Files[0].Dependents != 1 {
-		t.Fatalf("impact %+v, want lib/old.js with 1 dependent", f.Impact.Files)
+	if len(f.Impact.Files) != 1 || f.Impact.Files[0].Dependents != 2 {
+		t.Fatalf("impact %+v, want lib/old.js with 2 dependents", f.Impact.Files)
+	}
+	if want := []string{"README.md", "app/index.js"}; !reflect.DeepEqual(f.Files[0].Referrers, want) {
+		t.Errorf("referrers %v, want %v", f.Files[0].Referrers, want)
 	}
 	from := []string{"lib/old.js"}
 	for _, p := range res.Breakdown {
@@ -130,5 +140,67 @@ func TestDeletedFileStillReferencedCounts(t *testing.T) {
 				t.Errorf("%s from %v, want %v", p.Measure, p.From, from)
 			}
 		}
+	}
+}
+
+// TestDeletedFileOnlyAReadmeNames drives the built binary on a change that
+// deletes flow/foundry.py, which only a README at head names. A doc naming a
+// deleted file does not rely on it: size, degree and tests are 0 with the file
+// in size's excluded paths, while impact still counts the README.
+func TestDeletedFileOnlyAReadmeNames(t *testing.T) {
+	bin := filepath.Join(t.TempDir(), "riskelle")
+	if out, err := exec.Command("go", "build", "-o", bin, "../cmd/riskelle").CombinedOutput(); err != nil {
+		t.Fatalf("go build: %v\n%s", err, out)
+	}
+	dir := deletionFixture(t, map[string]string{
+		"flow/foundry.py": numbered("x", 60),
+		"README.md":       "The Foundry review (flow/foundry.py) is removed.\n",
+	}, "flow/foundry.py")
+
+	code, out, stderr := runScore(t, bin, dir, "--base", "main", "--head", "topic")
+	if code != 0 || stderr != "" {
+		t.Fatalf("riskelle score: exit %d, stderr %q", code, stderr)
+	}
+	var rep report.Report
+	if err := json.Unmarshal([]byte(out), &rep); err != nil {
+		t.Fatalf("decode report: %v\n%s", err, out)
+	}
+	seen := 0
+	for _, p := range rep.Breakdown {
+		switch p.Measure + "/" + p.Fact {
+		case "size/lines":
+			seen++
+			if p.Value != 0 || p.Points != 0 || len(p.From) != 0 || !reflect.DeepEqual(p.Excluded, []string{"flow/foundry.py"}) {
+				t.Errorf("size = %+v, want 0 (0) with flow/foundry.py excluded", p)
+			}
+		case "degree/existing_lines":
+			seen++
+			if p.Value != 0 || p.Points != 0 {
+				t.Errorf("degree = %+v, want 0 (0)", p)
+			}
+		case "tests/untested_production_files":
+			seen++
+			if p.Value != 0 {
+				t.Errorf("tests = %+v, want 0", p)
+			}
+		case "impact/dependents":
+			seen++
+			want := []facts.Dependency{{Name: "flow/foundry.py", Dependents: 1}}
+			if p.Value != 1 || !reflect.DeepEqual(p.Dependents, want) {
+				t.Errorf("impact = %+v, want 1 with %v", p, want)
+			}
+		}
+	}
+	if seen != 4 {
+		t.Errorf("found %d of the 4 measures in %s", seen, out)
+	}
+
+	// After the run: collectAndScore changes the working directory.
+	f, _, err := collectAndScore(t, dir)
+	if err != nil {
+		t.Fatalf("rules.Score: %v", err)
+	}
+	if len(f.Files) != 1 || !reflect.DeepEqual(f.Files[0].Referrers, []string{"README.md"}) {
+		t.Errorf("files %+v, want flow/foundry.py referred to by README.md", f.Files)
 	}
 }

@@ -97,13 +97,15 @@ func Collect(ctx context.Context, repo, base, head string) (Facts, error) {
 			touched = append(touched, f.OldPath)
 		}
 	}
-	impact, pkgs, err := collectImpact(ctx, repo, headSHA, touched)
+	impact, sc, err := collectImpact(ctx, repo, headSHA, touched)
 	if err != nil {
 		return Facts{}, err
 	}
+	pkgs, refs := sc.packages(), sc.fileReferrers()
 	for i := range files {
 		if files[i].Deleted {
 			files[i].Package = pkgs[files[i].Path]
+			files[i].Referrers = refs[files[i].Path]
 		}
 	}
 	return Facts{

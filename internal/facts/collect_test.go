@@ -454,3 +454,47 @@ func TestCollectShellShebang(t *testing.T) {
 		}
 	}
 }
+
+// TestCollectReferrers pins that Collect gives each deleted file impact counts
+// as a file the head paths that refer to it, gives a deleted Go file its
+// package and no referrers, and gives a modified file none however many name
+// it; the dependent counts are the referrer counts.
+func TestCollectReferrers(t *testing.T) {
+	dir := t.TempDir()
+	runGit(t, dir, "init", "--quiet", "--initial-branch=main")
+	for name, content := range map[string]string{
+		"go.mod":        "module example.com/m\n",
+		"core/old.go":   "package core\n",
+		"web/gone.js":   "export const gone = 1\n",
+		"web/used.js":   "export const used = 1\n",
+		"web/kept.js":   "export const kept = 1\n",
+		"web/app.js":    "import './used'\nimport './kept'\n",
+		"README.md":     "core/old.go, web/gone.js and web/kept.js\n",
+		"docs/notes.md": "see web/used.js\n",
+	} {
+		write(t, dir, name, content)
+	}
+	runGit(t, dir, "add", ".")
+	runGit(t, dir, "commit", "--quiet", "-m", "base")
+	runGit(t, dir, "switch", "--quiet", "-c", "feature")
+	runGit(t, dir, "rm", "--quiet", "core/old.go", "web/gone.js", "web/used.js")
+	write(t, dir, "web/kept.js", "export const kept = 2\n")
+	runGit(t, dir, "commit", "--quiet", "-am", "delete")
+
+	got, err := Collect(context.Background(), dir, "main", "feature")
+	if err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+	files, _ := json.Marshal(got.Files)
+	want := `[{"path":"core/old.go","added":0,"removed":1,"deleted":true,"package":"example.com/m/core"},` +
+		`{"path":"web/gone.js","added":0,"removed":1,"deleted":true,"referrers":["README.md"]},` +
+		`{"path":"web/kept.js","added":1,"removed":1},` +
+		`{"path":"web/used.js","added":0,"removed":1,"deleted":true,"referrers":["docs/notes.md","web/app.js"]}]`
+	if string(files) != want {
+		t.Errorf("files =\n%s\nwant\n%s", files, want)
+	}
+	wantImpact := []Dependency{{Name: "web/gone.js", Dependents: 1}, {Name: "web/kept.js", Dependents: 2}, {Name: "web/used.js", Dependents: 2}}
+	if !reflect.DeepEqual(got.Impact.Files, wantImpact) {
+		t.Errorf("impact files = %+v, want %+v", got.Impact.Files, wantImpact)
+	}
+}

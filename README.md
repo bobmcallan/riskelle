@@ -64,11 +64,16 @@ case-insensitively, are `do not edit`, `do not modify`, `@generated` and
 A deleted file that nothing at head depends on is not code anything still
 relies on. When its impact entry (for a Go file, its package's entry) has 0
 dependents, it is left out of size, degree and tests and listed in size's
-excluded paths. A deleted file with 1 or more dependents, or with no impact
-entry, counts in full. Spread, impact and consequences still see every deleted
-path, so a floor on a deleted path still floors. The facts mark such a file
-`"deleted": true` and, for a Go file, name its package's import path in
-`"package"`.
+excluded paths. A doc naming a deleted file does not rely on it either: a
+deleted file that impact counts as a file is left out the same way when every
+file at head that refers to it is in the docs class (a README saying it was
+removed, a ticket note). Any other referrer (code, config, tests) keeps it
+counting in full, as do a Go package with dependents and a deleted file with no
+impact entry. Spread, impact and consequences still see every deleted path, and
+impact still counts every referrer, docs included, so a floor on a deleted path
+still floors. The facts mark such a file `"deleted": true`, name a Go file's
+package import path in `"package"`, and list the head paths that refer to any
+other deleted file in `"referrers"`.
 
 Each measure scores points in fixed bands; the total is 0–100, reported as Low,
 Medium or High. The band edges are calibrated from real merge history before

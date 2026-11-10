@@ -22,8 +22,11 @@ type File struct {
 	Deleted bool `json:"deleted,omitempty"`
 	// A deleted file only: the import path of the Go package impact counts it
 	// under (its Impact.Packages entry); "" when impact counts it as a file.
-	Package string  `json:"package,omitempty"`
-	Classes []Class `json:"classes,omitempty"` // path classes from Classify; nil when none
+	Package string `json:"package,omitempty"`
+	// A deleted file impact counts as a file only: the head paths that refer
+	// to it, sorted, the ones its Impact.Files entry counts; nil when none.
+	Referrers []string `json:"referrers,omitempty"`
+	Classes   []Class  `json:"classes,omitempty"` // path classes from Classify; nil when none
 	// The unpaired language read from the file's content when its path names
 	// none: "Shell" for an extensionless file whose first line is a shell
 	// shebang; "" otherwise.

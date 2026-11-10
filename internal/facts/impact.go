@@ -30,11 +30,12 @@ func CollectImpact(ctx context.Context, repo, commit string, paths []string) (Im
 	return imp, err
 }
 
-// collectImpact is CollectImpact that also maps each changed path impact
-// counts under a Go package to that package's import path.
-func collectImpact(ctx context.Context, repo, commit string, paths []string) (Impact, map[string]string, error) {
+// collectImpact is CollectImpact that also returns the scan, which names the
+// Go package each changed path counts under (packages) and the paths that
+// refer to each changed file (fileReferrers).
+func collectImpact(ctx context.Context, repo, commit string, paths []string) (Impact, *scan, error) {
 	if len(paths) == 0 {
-		return emptyImpact(), nil, nil
+		return emptyImpact(), newScan(nil), nil
 	}
 	blobs, err := treeBlobs(ctx, repo, commit)
 	if err != nil {
@@ -66,7 +67,7 @@ func collectImpact(ctx context.Context, repo, commit string, paths []string) (Im
 	if err := catBlobs(ctx, repo, rest, s.add); err != nil {
 		return Impact{}, nil, err
 	}
-	return s.result(), s.packages(), nil
+	return s.result(), s, nil
 }
 
 func emptyImpact() Impact {
@@ -254,6 +255,18 @@ func (s *scan) packages() map[string]string {
 	for _, p := range s.changed {
 		if ip, _ := s.pkgOf(p); ip != "" {
 			out[p] = ip
+		}
+	}
+	return out
+}
+
+// fileReferrers maps each changed file (not a package) that something refers
+// to to the referring paths, sorted.
+func (s *scan) fileReferrers() map[string][]string {
+	out := map[string][]string{}
+	for _, p := range s.changedFiles() {
+		if set := s.referrers[p]; len(set) > 0 {
+			out[p] = sorted(set)
 		}
 	}
 	return out

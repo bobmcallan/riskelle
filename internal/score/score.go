@@ -38,7 +38,7 @@ type Point struct {
 	Min      int      `json:"min"`                // lower edge of the band it fell in
 	Points   int      `json:"points"`             // the band's points
 	From     []string `json:"from"`               // paths, directories or projects counted; sorted, non-nil
-	Excluded []string `json:"excluded,omitempty"` // size and impact: paths left out by class, or (size) as a deleted file nothing depends on; sorted
+	Excluded []string `json:"excluded,omitempty"` // size and impact: paths left out by class, or (size) as a deleted file nothing but docs depends on; sorted
 
 	// Impact only: each counted package or file and its dependent count,
 	// sorted by name.
@@ -237,8 +237,8 @@ func floored(l Level, cs []Consequence, edges []LevelEdge) Level {
 // counted splits files into those size, degree and tests count and the paths
 // of the rest. A file is left out when it is in one of the rules' excluded
 // classes, when its path matches the rules' Generated globs (it counts as
-// generated), or when it is a deleted file nothing at head depends on
-// (unused). Size, degree and tests all count only the kept files.
+// generated), or when it is a deleted file nothing at head but docs depends
+// on (unused). Size, degree and tests all count only the kept files.
 func counted(files []facts.File, imp facts.Impact, r Rules) (kept []facts.File, excluded []string) {
 	ex := map[facts.Class]bool{}
 	for _, c := range r.SizeExcludes {
@@ -259,8 +259,10 @@ func counted(files []facts.File, imp facts.Impact, r Rules) (kept []facts.File, 
 }
 
 // unused reports whether file is a deleted file nothing at head depends on:
-// its impact entry (for a Go file, its package's entry) has 0 dependents. A
-// deleted file with no entry counts, since nothing shows that it is unused.
+// its impact entry (for a Go file, its package's entry) has 0 dependents, or,
+// for a file impact counts as a file, every one of its dependents is a doc
+// (docsOnly). A deleted file with no entry counts, since nothing shows that
+// it is unused.
 func unused(file facts.File, imp facts.Impact) bool {
 	if !file.Deleted {
 		return false
@@ -271,10 +273,27 @@ func unused(file facts.File, imp facts.Impact) bool {
 	}
 	for _, d := range deps {
 		if d.Name == name {
-			return d.Dependents == 0
+			return d.Dependents == 0 || (file.Package == "" && docsOnly(file.Referrers, d.Dependents))
 		}
 	}
 	return false
+}
+
+// docsOnly reports whether referrers accounts for all n dependents and each
+// is in the built-in docs class: a doc naming a deleted file (a README saying
+// it was removed, a ticket note) does not rely on it. Facts with dependents
+// but no matching referrers count in full.
+func docsOnly(referrers []string, n int) bool {
+	if n == 0 || len(referrers) != n {
+		return false
+	}
+	docs := map[facts.Class]bool{facts.ClassDocs: true}
+	for _, p := range referrers {
+		if !anyExcluded(facts.Classify(p), docs) {
+			return false
+		}
+	}
+	return true
 }
 
 // size sums the lines added and removed in the kept files, recording the
