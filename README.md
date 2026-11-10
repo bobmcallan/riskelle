@@ -276,8 +276,10 @@ line included.
   `production`, or starts with one followed by a character that is not a
   letter (`prd-aue`, `prod_eu`, `production.web`); `product`, `pre-prod` and
   `nonprod` do not. The consequence's types are the environment names as
-  written. The names are built in, recorded in the rules hash, and refused by
-  name if `.risk/rules.json` sets them.
+  written. The names are built in and recorded in the rules hash;
+  `.risk/rules.json` may name more under `production_environments`, read from
+  the target branch and recorded in the rules hash, but cannot remove a
+  built-in one.
 - Each side a definition changed on is read: head when the change adds a line
   to it, the merge base when it removes one, so changing `prd` to `dev` still
   carries the class.
@@ -679,12 +681,15 @@ line it leaves for reviewers, is in the skill file itself.
 
 - **Built in, versioned with each release:** the measures, weights, bands,
   consequence floors (`consequence_floors`), the shape cap (`shape_cap`), the
-  production environment names (`production_environments`) and default patterns. Changed only by a riskelle release, so the scale is the same
-  everywhere.
+  built-in production environment names (`prd`, `prod`, `production`) and
+  default patterns. Changed only by a riskelle release, so the scale is the
+  same everywhere; a repo may add production environment names, never remove
+  one.
 - **`.risk/rules.json` in the assessed repo:** settings that can only *add*
   risk or context (extra generated paths for the report, extra sensitive
   areas, the exclusion toggles `exclude_non_code_files` and
-  `exclude_log_files`, `production_roots` and `consequence_classes`). It is read from the **target branch**, so a change cannot alter its
+  `exclude_log_files`, `production_roots`, `consequence_classes` and
+  `production_environments`). It is read from the **target branch**, so a change cannot alter its
   own rules. Anything that would lower a score is refused by name. A change
   that edits `.risk/` is scored like any other change: riskelle does not try
   to guard against a dishonest developer. riskelle's own
@@ -696,6 +701,15 @@ Production roots in `.risk/rules.json`, such as
 under them to High (see [Consequences](#consequences)). A root that is empty,
 absolute or does not end in `/**` is refused by name; roots with no consequence
 in them change nothing.
+
+Production environments in `.risk/rules.json`, such as
+`{"production_environments": ["live"]}`, add job environment names that
+`production_deploy` treats as production, beside the built-in `prd`, `prod`
+and `production` (see [Consequences](#consequences)). An added name matches as
+a built-in one does: ignoring case, alone or followed by a non-letter
+(`live-aue`). Names are only added: nothing removes a built-in name, and an
+empty list changes nothing. An empty name, or an entry that is not a string,
+is refused by name.
 
 Repo consequence classes in `.risk/rules.json`, such as
 `{"consequence_classes": {"release_guard": {"paths": ["scripts/plan-guard-allow*"], "floor": "Medium"}}}`,

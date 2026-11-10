@@ -79,7 +79,7 @@ type Rules struct {
 	// The job environment names a pipeline definition deploys to production
 	// with (facts.IsProduction): a changed definition naming one carries
 	// production_deploy. Always set and always hashed; .risk/rules.json may
-	// not set it.
+	// add names to it (production_environments) but never remove one.
 	ProductionEnvironments []string `json:"production_environments"`
 
 	// Repo-named production roots (.risk/rules.json): directory globs. A

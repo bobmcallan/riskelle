@@ -58,7 +58,8 @@ func TestDefaultShapeCap(t *testing.T) {
 }
 
 // TestDefaultProductionEnvironments pins the built-in production environment
-// names, fresh on each call so no caller can change them.
+// names, fresh on each call so no caller can change them: a repo's names are
+// added to a copy (rules.Apply), never to the built-in list.
 func TestDefaultProductionEnvironments(t *testing.T) {
 	d := Default()
 	if want := []string{"prd", "prod", "production"}; !reflect.DeepEqual(d.ProductionEnvironments, want) {

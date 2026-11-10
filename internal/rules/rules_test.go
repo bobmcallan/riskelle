@@ -48,6 +48,12 @@ func TestParse(t *testing.T) {
 		{`{"production_roots":["prod-tenant/"]}`, File{}, `production_roots[0] "prod-tenant/": a production root names a directory`},
 		{`{"production_roots":"prod-tenant/**"}`, File{}, "production_roots"},
 		{`{"areas":["x"]}`, File{}, "cannot unmarshal"},
+		{`{"production_environments":["live","PRD-AU"]}`, File{ProductionEnvironments: []string{"live", "PRD-AU"}}, ""},
+		{`{"production_environments":[]}`, File{ProductionEnvironments: []string{}}, ""},
+		{`{"Production_Environments":["live"]}`, File{ProductionEnvironments: []string{"live"}}, ""},
+		{`{"production_environments":["live",""]}`, File{}, "production_environments[1]: empty name"},
+		{`{"production_environments":[" "]}`, File{}, "production_environments[0]: empty name"},
+		{`{"production_environments":[null]}`, File{}, "production_environments[0]: empty name"},
 		{`{"consequence_classes":{"release_guard":{"paths":["scripts/plan-guard-allow*"],"floor":"Medium"}}}`,
 			File{ConsequenceClasses: map[string]ConsequenceClass{"release_guard": {Paths: []string{"scripts/plan-guard-allow*"}, Floor: "Medium"}}}, ""},
 		{`{"consequence_classes":{"release_guard":{"paths":["x/**"],"floor":"High"}}}`,
@@ -88,7 +94,8 @@ func TestParse(t *testing.T) {
 }
 
 // TestRefusedCoversEveryBuiltinSetting: every built-in setting except the
-// additive generated paths is refused by name. The keys come from the
+// additive generated paths and production environment names is refused by
+// name. The keys come from the
 // built-in rules' JSON, not from the reflection that builds the refused set.
 func TestRefusedCoversEveryBuiltinSetting(t *testing.T) {
 	data, err := json.Marshal(score.Default())
@@ -101,9 +108,9 @@ func TestRefusedCoversEveryBuiltinSetting(t *testing.T) {
 	}
 	for key := range keys {
 		_, err := Parse([]byte(`{"` + key + `":null}`))
-		if key == "generated" {
+		if key == "generated" || key == "production_environments" {
 			if err != nil {
-				t.Errorf("Parse(generated) error = %v, want it accepted", err)
+				t.Errorf("Parse(%s) error = %v, want it accepted", key, err)
 			}
 			continue
 		}
@@ -277,9 +284,9 @@ func TestHashRecordsProductionRoots(t *testing.T) {
 	}
 }
 
-// TestReadmeDocumentsProductionRoots pins the README's production roots and
-// repo consequence classes wording in Rules, Consequences, Report and Plan
-// file.
+// TestReadmeDocumentsProductionRoots pins the README's production roots,
+// repo consequence classes and production environments wording in Rules,
+// Consequences, Report and Plan file.
 func TestReadmeDocumentsProductionRoots(t *testing.T) {
 	data, err := os.ReadFile("../../README.md")
 	if err != nil {
@@ -303,8 +310,8 @@ func TestReadmeDocumentsProductionRoots(t *testing.T) {
 		return s
 	}
 	for heading, wants := range map[string][]string{
-		"## Rules":         {"`production_roots`", "/**", "`consequence_classes`"},
-		"### Consequences": {"`production_roots`", "High", "`consequence_classes`", "Medium or High"},
+		"## Rules":         {"`production_roots`", "/**", "`consequence_classes`", `{"production_environments": ["live"]}`},
+		"### Consequences": {"`production_roots`", "High", "`consequence_classes`", "Medium or High", "`production_environments`"},
 		"### Report":       {`"production_roots"`},
 		"### Plan file":    {"repo class"},
 	} {
@@ -356,5 +363,72 @@ func TestHashRecordsRepoClasses(t *testing.T) {
 		if b, _ := json.Marshal(r); strings.Contains(string(b), "consequence_classes") {
 			t.Errorf("rules without classes marshal a consequence_classes key: %s", b)
 		}
+	}
+}
+
+// TestParseProductionEnvironmentTypes: an entry that is not a string, or a
+// value that is not a list, is refused by the strict decode naming the key.
+func TestParseProductionEnvironmentTypes(t *testing.T) {
+	for _, v := range []string{`[5]`, `[true]`, `[["live"]]`, `"live"`, `{"a":"live"}`} {
+		in := `{"production_environments":` + v + `}`
+		_, err := Parse([]byte(in))
+		if err == nil || !strings.Contains(err.Error(), "production_environments") || !strings.Contains(err.Error(), "cannot unmarshal") {
+			t.Errorf("Parse(%s) error = %v, want it to name production_environments and cannot unmarshal", in, err)
+		}
+	}
+}
+
+// TestApplyProductionEnvironments: a file's names are added to the built-in
+// ones trimmed and lower-cased, as a sorted, de-duplicated union; nothing is
+// replaced or removed, and the input is not changed.
+func TestApplyProductionEnvironments(t *testing.T) {
+	def := score.Default().ProductionEnvironments
+	withExtra := score.Default()
+	withExtra.ProductionEnvironments = append(withExtra.ProductionEnvironments, "staging-prod")
+	for _, tt := range []struct {
+		name string
+		base score.Rules
+		f    File
+		want []string
+	}{
+		{"added", score.Default(), File{ProductionEnvironments: []string{"Live", "uat-prod", "PROD", " live "}},
+			[]string{"live", "prd", "prod", "production", "uat-prod"}},
+		{"no file", score.Default(), File{}, def},
+		{"empty list", score.Default(), File{ProductionEnvironments: []string{}}, def},
+		{"built-in only", score.Default(), File{ProductionEnvironments: []string{"PRD", "production"}}, def},
+		{"base extra kept", withExtra, File{ProductionEnvironments: []string{"live"}},
+			[]string{"live", "prd", "prod", "production", "staging-prod"}},
+	} {
+		got := Apply(tt.base, tt.f)
+		if !slices.Equal(got.ProductionEnvironments, tt.want) {
+			t.Errorf("%s: ProductionEnvironments = %q, want %q", tt.name, got.ProductionEnvironments, tt.want)
+		}
+	}
+	f := File{ProductionEnvironments: []string{"Live"}}
+	base := score.Default()
+	Apply(base, f)
+	if f.ProductionEnvironments[0] != "Live" || !slices.Equal(base.ProductionEnvironments, def) {
+		t.Errorf("Apply changed its input: file %q, base %q", f.ProductionEnvironments, base.ProductionEnvironments)
+	}
+}
+
+// TestHashRecordsProductionEnvironments: an added name changes the rules
+// hash; the same names in another order or case hash the same, and a name
+// already built in hashes as no file.
+func TestHashRecordsProductionEnvironments(t *testing.T) {
+	none := Hash(Apply(score.Default(), File{}))
+	if none != Hash(Apply(score.Default(), File{ProductionEnvironments: []string{}})) {
+		t.Error("an empty list changes the hash")
+	}
+	one := Hash(Apply(score.Default(), File{ProductionEnvironments: []string{"live", "uat"}}))
+	two := Hash(Apply(score.Default(), File{ProductionEnvironments: []string{"UAT", " Live"}}))
+	if one == none {
+		t.Error("an added name does not change the hash")
+	}
+	if one != two {
+		t.Error("the same names in another order or case hash differently")
+	}
+	if Hash(Apply(score.Default(), File{ProductionEnvironments: []string{"PROD"}})) != none {
+		t.Error("a built-in name changes the hash")
 	}
 }

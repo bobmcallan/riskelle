@@ -54,6 +54,11 @@ type File struct {
 	// class's globs carries it, floored at Medium or High. A built-in class
 	// name and a Low floor are refused by name (see Parse).
 	ConsequenceClasses map[string]ConsequenceClass `json:"consequence_classes"`
+
+	// Production environments: job environment names production_deploy treats
+	// as production, added to the built-in ones. A name only adds a match, so
+	// it can only raise. An empty entry is refused by name (see Parse).
+	ProductionEnvironments []string `json:"production_environments"`
 }
 
 // ConsequenceClass is one repo consequence class in a File.
@@ -135,6 +140,11 @@ func Parse(data []byte) (File, error) {
 	for i, p := range f.ProductionRoots {
 		if !strings.HasSuffix(p, "/**") || p == "/**" {
 			return File{}, fmt.Errorf("production_roots[%d] %q: a production root names a directory and ends in /**", i, p)
+		}
+	}
+	for i, name := range f.ProductionEnvironments {
+		if strings.TrimSpace(name) == "" {
+			return File{}, fmt.Errorf("production_environments[%d]: empty name", i)
 		}
 	}
 	for _, name := range slices.Sorted(maps.Keys(f.Areas)) {
@@ -253,7 +263,9 @@ func checkToggles(data []byte) error {
 // ProductionRoots, and so does each area's
 // patterns in Areas, a fresh map nil when empty. Repo consequence classes
 // become RepoClasses, sorted by class with their globs sorted and
-// de-duplicated, nil when none. Each exclusion toggle that
+// de-duplicated, nil when none. ProductionEnvironments becomes the sorted,
+// de-duplicated union of the built-in names and the file's, trimmed and
+// lower-cased, so a name is only ever added. Each exclusion toggle that
 // is absent or true adds its class to SizeExcludes once; one set to false
 // removes it, so its files count. r is not changed.
 func Apply(r score.Rules, f File) score.Rules {
@@ -268,6 +280,11 @@ func Apply(r score.Rules, f File) score.Rules {
 	r.SizeExcludes = ex
 	r.Generated = union(r.Generated, f.Generated)
 	r.ProductionRoots = union(r.ProductionRoots, f.ProductionRoots)
+	envs := make([]string, 0, len(f.ProductionEnvironments))
+	for _, name := range f.ProductionEnvironments {
+		envs = append(envs, strings.ToLower(strings.TrimSpace(name)))
+	}
+	r.ProductionEnvironments = union(r.ProductionEnvironments, envs)
 	var areas map[string][]string
 	for _, m := range []map[string][]string{r.Areas, f.Areas} {
 		for name, ps := range m {
