@@ -120,6 +120,23 @@ release_template_ref    = "refs/heads/main" # must match pipelines/release.yml
 	deliveryTfvarsApproved = `release_subscription_id = "00000000-0000-0000-0000-000000000000" # platform
 release_template_ref    = "refs/heads/main"                      # must match pipelines/release.yml
 `
+	// deliveryAuthorization lets one pipeline use one environment: the id of
+	// each is a literal in a local, so what the environment is cannot be read.
+	deliveryAuthorization = `locals {
+  app_environments = {
+    app = { pipeline_id = 101, environment_id = 201 } # dev
+  }
+}
+
+resource "azuredevops_pipeline_authorization" "app" {
+  for_each = local.app_environments
+
+  project_id  = data.azuredevops_project.p.id
+  resource_id = tostring(each.value.environment_id)
+  type        = "environment"
+  pipeline_id = each.value.pipeline_id
+}
+`
 	deliveryIAM = `data "azuread_service_principal" "deployer" {
   display_name = "deployer-one"
 }
@@ -137,8 +154,10 @@ resource "azuread_directory_role" "reader" {
 // of the unchanged assignment beside it. Nothing is granted, so the change is
 // Medium on identity_rights alone (the removed checks and the environments)
 // and the report never names access_widened. Each restyle or label edit
-// alone widens nothing; a changed value, an added approver and a
-// display_name that selects what a grant targets still do.
+// alone widens nothing. Neither does a delivery gate added or altered: a
+// changed template ref, an approver added to a check, or a pipeline
+// authorised for an environment is Medium. A display_name that selects what
+// a grant targets still widens.
 func TestAccessWidenedNeedsAWidening(t *testing.T) {
 	bin := buildRiskelle(t, t.TempDir())
 	base := map[string]string{
@@ -168,6 +187,10 @@ func TestAccessWidenedNeedsAWidening(t *testing.T) {
 	both := func(path, types string) string {
 		return `[{"class":"access_widened","paths":["` + path + `"],` + types + `,"floor":"High"},` +
 			`{"class":"identity_rights","paths":["` + path + `"],` + types + `,"floor":"Medium"}]`
+	}
+
+	alone := func(path, types string) string {
+		return `[{"class":"identity_rights","paths":["` + path + `"],` + types + `,"floor":"Medium"}]`
 	}
 
 	for _, tt := range []struct {
@@ -201,11 +224,14 @@ func TestAccessWidenedNeedsAWidening(t *testing.T) {
 		{"a realigned assignment whose value also changed",
 			map[string]string{"delivery/terraform.tfvars": replace(deliveryTfvars,
 				`"refs/heads/main" # must match`, `"refs/heads/release"                   # must match`)},
-			score.High, []string{"access_widened"}, both("delivery/terraform.tfvars", viaVar)},
+			score.Medium, []string{"identity_rights"}, alone("delivery/terraform.tfvars", viaVar)},
 		{"an approver added to a check",
 			map[string]string{"delivery/agents.tf": replace(deliveryEnv("agents"),
 				"[data.azuredevops_identity_user.approver.id]", "[data.azuredevops_identity_user.approver.id, data.azuredevops_identity_user.second.id]")},
-			score.High, []string{"access_widened"}, both("delivery/agents.tf", approvers)},
+			score.Medium, []string{"identity_rights"}, alone("delivery/agents.tf", approvers)},
+		{"a pipeline authorised for an environment in a new file, through for_each over a local",
+			map[string]string{"delivery/authorization.tf": deliveryAuthorization},
+			score.Medium, []string{"identity_rights"}, alone("delivery/authorization.tf", `"types":["azuredevops_pipeline_authorization"]`)},
 		{"a display_name that selects the principal a grant targets",
 			map[string]string{"delivery/iam.tf": replace(deliveryIAM, "deployer-one", "deployer-two")},
 			score.High, []string{"access_widened"}, both("delivery/iam.tf", `"types":["azuread_service_principal"]`)},

@@ -33,7 +33,8 @@ const (
 // kept. Both lists are sorted,
 // distinct and non-nil; Types is empty for a plan, which has no content.
 // access_widened carries the paths and types of the identity_rights lines
-// added at head that carried it, less those in a label attribute.
+// added at head that carried it, less those in a label attribute or a
+// delivery gate.
 type Consequence struct {
 	Class string   `json:"class"`
 	Paths []string `json:"paths"`
@@ -58,6 +59,12 @@ type Consequence struct {
 // included) carries access_widened too, with the same path and type. Its
 // labels are the top-level attributes that say what a block is for, not what
 // it grants: a line in one carries identity_rights but never access_widened.
+// Its gates are the delivery gates: which pipeline may use an environment or
+// resource, the environment, its checks, branch policies, protections and
+// rulesets. A gate takes effect only when a pipeline then runs, and a revert
+// of the merge puts it back, so a line in one never carries access_widened
+// either. Identities and what they may do (service connections, permissions,
+// memberships, role assignments) are grants and do.
 //
 // definition_write is a script that writes a release or build definition out
 // of band: reverting the merge does not undo a write already made.
@@ -82,10 +89,22 @@ var builtinConsequences = []struct {
 	attributes map[string][]string // exact type: the top-level attributes whose lines carry the class
 	widens     string              // the class this one accompanies on a line added at head
 	labels     []string            // the top-level attributes on whose lines a widening class does not accompany
+	gates      []string            // the block types whose lines a widening class does not accompany: delivery gates
 	removed    []string            // resource types whose block removed from its directory carries the class
 	secrets    []secretRule        // the rules whose match on a line added at head carries the class
 }{
-	{class: ConsequenceAccessWidened, widens: ConsequenceIdentityRights, labels: []string{"description", "display_name"}},
+	{class: ConsequenceAccessWidened, widens: ConsequenceIdentityRights, labels: []string{"description", "display_name"}, gates: []string{
+		"azuredevops_branch_policy_*",
+		"azuredevops_check_*",
+		"azuredevops_environment*",
+		"azuredevops_pipeline_authorization",
+		"azuredevops_resource_authorization",
+		"github_actions_environment_*",
+		"github_branch_protection*",
+		"github_organization_ruleset",
+		"github_repository_environment*",
+		"github_repository_ruleset",
+	}},
 	{class: ConsequenceDefinitionWrite, commands: []string{
 		"az devops invoke", "az pipelines", "az pipelines release", "az rest", "curl", "Invoke-RestMethod",
 	}},
@@ -169,13 +188,14 @@ type compiledConsequence struct {
 	class   string
 	globs   Globs
 	removed Globs
+	gates   Globs
 }
 
 // compiledConsequences holds builtinConsequences compiled once.
 var compiledConsequences = func() []compiledConsequence {
 	out := make([]compiledConsequence, 0, len(builtinConsequences))
 	for _, c := range builtinConsequences {
-		out = append(out, compiledConsequence{c.class, CompileGlobs(c.patterns), CompileGlobs(c.removed)})
+		out = append(out, compiledConsequence{c.class, CompileGlobs(c.patterns), CompileGlobs(c.removed), CompileGlobs(c.gates)})
 	}
 	return out
 }()
@@ -213,6 +233,24 @@ func label(l tfLine) bool {
 	}
 	for _, c := range builtinConsequences {
 		if c.widens != "" && slices.Contains(c.labels, l.attr) {
+			return true
+		}
+	}
+	return false
+}
+
+// gate reports whether block is a delivery gate: which pipeline may use an
+// environment or resource, the environment, its checks, branch policies,
+// protections and rulesets. A class read on its lines is recorded, but not
+// the class that widens it: a gate takes effect only when a pipeline runs,
+// and a revert of the merge puts it back. A permissions type grants, whatever
+// it guards, and is never a gate.
+func gate(block string) bool {
+	if strings.HasSuffix(block, "_permissions") {
+		return false
+	}
+	for _, c := range compiledConsequences {
+		if c.gates.Match(block) {
 			return true
 		}
 	}
@@ -604,7 +642,8 @@ func filePatch(ctx context.Context, repo, mergeBase, head string, f File) ([]byt
 // A class read on a line added at head (an altered line is one removed and
 // one added) also adds each class that widens it, access_widened for
 // identity_rights, with the same path and type; the merge-base side adds
-// none, and neither does a line in a label attribute (label). In a .tf or
+// none, and neither does a line in a label attribute (label) or in a
+// delivery gate (gate). In a .tf or
 // .tfvars file a restyled line (restyledLines) is not a changed line at
 // either side, and an inert one (blank or a full-line comment) carries no
 // class and sets no variable. A catalogued resource block whose address leaves its directory adds
@@ -688,7 +727,7 @@ func collectConsequences(ctx context.Context, repo, mergeBase, head string, file
 			}
 		}
 		// widen is false for a line that cannot widen its class: one at the
-		// merge base, or in a label attribute.
+		// merge base, in a label attribute, or in a delivery gate.
 		hit := func(class, p, typ string, widen bool) {
 			record(class, p, typ)
 			if widen {
@@ -773,7 +812,7 @@ func collectConsequences(ctx context.Context, repo, mergeBase, head string, file
 				if l.block == "" {
 					continue
 				}
-				widen := at.added && !label(l)
+				widen := at.added && !label(l) && !gate(l.block)
 				for _, class := range consequencesOf(l.block) {
 					hit(class, p, l.block, widen)
 				}
@@ -804,7 +843,7 @@ func collectConsequences(ctx context.Context, repo, mergeBase, head string, file
 					if l.block == "" || !refersTo(text[i], name) {
 						continue
 					}
-					widen := at.added && !label(l)
+					widen := at.added && !label(l) && !gate(l.block)
 					for cp := range changed {
 						for _, class := range consequencesOf(l.block) {
 							hit(class, cp, l.block+" via var."+name, widen)

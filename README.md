@@ -144,7 +144,7 @@ or absolute glob are refused by name: a repo class can only raise the level.
 
 | Class | Floor | Read from |
 | --- | --- | --- |
-| `access_widened` | High | A line added at head that carries `identity_rights`: a grant added or altered, a variable it uses included; the same paths and types. Never a removed line, a `description` or `display_name` label, or a line that changed only in whitespace or a comment |
+| `access_widened` | High | A line added at head that carries `identity_rights` outside a delivery gate: a grant of identity rights added or altered, a variable it uses included; the same paths and types. Never a removed line, a delivery-gate line, a `description` or `display_name` label, or a line that changed only in whitespace or a comment |
 | `definition_write` | High | Added lines of any text file but docs: a logical shell command that is `az devops invoke` with `--area release` or `build` and an `--http-method` of `PUT`, `POST`, `PATCH` or `DELETE`; `az pipelines` or `az pipelines release` directly followed by `create`, `update` or `delete`; or `curl`, `az rest` or `Invoke-RestMethod` with a write method against a URL containing `_apis/release/definitions` or `_apis/build/definitions` |
 | `destructive_migration` | High | Added lines of an EF Core migration (`**/Migrations/**/*.cs`): the `migrationBuilder` calls `DeleteData`, `DropColumn`, `DropSchema`, `DropTable`, `RenameColumn`, `RenameTable`; added lines of a migration or a `.sql` file: `DROP TABLE`, `DROP COLUMN`, `DROP SCHEMA`, `DROP DATABASE`, `DROP VIEW`, `TRUNCATE`, `DELETE FROM`, `ALTER TABLE DROP` (`ALTER TABLE ... DROP`) |
 | `identity_rights` | Medium | `aws_iam_*`, `azuread_administrative_unit_member`, `azuread_app_role_assignment`, `azuread_application*`, `azuread_directory_role*`, `azuread_group_member`, `azuread_group_role_management_policy`, `azuread_service_principal*`, `azuredevops_*_permissions`, `azuredevops_branch_policy_*`, `azuredevops_check_*`, `azuredevops_environment*`, `azuredevops_group_membership`, `azuredevops_pipeline_authorization`, `azuredevops_resource_authorization`, `azuredevops_securityrole_assignment`, `azuredevops_serviceendpoint_*`, `azurerm_federated_identity_credential`, `azurerm_role_assignment`, `azurerm_role_definition`, `azurerm_user_assigned_identity`, `github_actions_*_oidc_subject_claim_customization_template`, `github_actions_*_permissions`, `github_actions_environment_*`, `github_branch_protection*`, `github_organization_ruleset`, `github_repository_collaborator*`, `github_repository_environment*`, `github_repository_ruleset`, `github_team_members`, `github_team_membership`, `github_team_repository`, `google_*_iam_*` (Terraform types, globs); `azuread_group` only in its `members` or `owners` attribute, reported as `azuread_group.members` or `azuread_group.owners` |
@@ -156,7 +156,9 @@ or absolute glob are refused by name: a repo class can only raise the level.
 - Delivery rights count as identity and rights: Azure DevOps and GitHub service
   connections and their authorisations, deployment environments and their
   checks, branch policies and protections, and permissions decide who can act
-  as a deploy identity. Generic secrets and variables
+  as a deploy identity. Service connections and permissions are identities
+  and what they may do; the rest are delivery gates (below). Generic secrets
+  and variables
   (`github_actions_secret`, `azuredevops_variable_group`) do not.
 - Group membership counts too: who is in a group decides who holds the roles
   granted to it, as a role assignment does.
@@ -201,6 +203,22 @@ or absolute glob are refused by name: a repo class can only raise the level.
   `display_name` is no label where it decides access: in a `data` block it
   selects the object read (which principal a grant targets), and in
   `azuread_directory_role` it names the role.
+- A delivery gate does not widen. The gates are
+  `azuredevops_pipeline_authorization`, `azuredevops_resource_authorization`,
+  `azuredevops_environment*`, `azuredevops_check_*`,
+  `azuredevops_branch_policy_*`, `github_repository_environment*`,
+  `github_actions_environment_*`, `github_branch_protection*`,
+  `github_repository_ruleset` and `github_organization_ruleset`, but never a
+  `*_permissions` type. Which pipeline may use an environment or resource,
+  the environment, its checks, policies, protections and rulesets take effect
+  only when a pipeline then runs, and a revert of the merge puts them back:
+  a line in one, or a variable only a gate uses, carries `identity_rights`
+  (Medium) but never `access_widened`. Adding a check is a restriction. What
+  a gate guards is not read (an environment is often a bare id), so a Dev and
+  a production environment read the same; a change to a pipeline that deploys
+  to production is already `production_deploy`, and a repo that wants its
+  production gates High names a production root or a repo class over those
+  paths.
 - A restyle is not a change. In a `.tf` or `.tfvars` file, a removed line and
   a later added line of the same hunk that differ only in whitespace outside
   a string or in a trailing `#` or `//` comment are the same line, as when

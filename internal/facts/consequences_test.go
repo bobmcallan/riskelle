@@ -208,6 +208,43 @@ func TestLabel(t *testing.T) {
 	}
 }
 
+// TestGate pins the delivery gates, whose lines carry identity_rights but
+// never the class that widens it, and the identity types beside them, a
+// permissions type included, which still widen.
+func TestGate(t *testing.T) {
+	for _, typ := range []string{
+		"azuredevops_pipeline_authorization", "azuredevops_resource_authorization",
+		"azuredevops_environment", "azuredevops_environment_resource_kubernetes",
+		"azuredevops_check_approval", "azuredevops_check_branch_control", "azuredevops_check_business_hours",
+		"azuredevops_check_exclusive_lock", "azuredevops_check_required_template",
+		"azuredevops_branch_policy_min_reviewers", "azuredevops_branch_policy_build_validation",
+		"github_repository_environment", "github_repository_environment_deployment_policy",
+		"github_actions_environment_secret", "github_actions_environment_variable",
+		"github_branch_protection", "github_branch_protection_v3",
+		"github_repository_ruleset", "github_organization_ruleset",
+	} {
+		if !gate(typ) {
+			t.Errorf("gate(%q) = false, want true", typ)
+		}
+		if got := consequencesOf(typ); !reflect.DeepEqual(got, []string{ConsequenceIdentityRights}) {
+			t.Errorf("consequencesOf(%q) = %v, want [identity_rights]", typ, got)
+		}
+	}
+	for _, typ := range []string{
+		"azuredevops_serviceendpoint_azurerm", "azuredevops_serviceendpoint_permissions", "azuredevops_git_permissions",
+		"azuredevops_environment_permissions", "azuredevops_group_membership", "azuredevops_securityrole_assignment",
+		"azurerm_role_assignment", "azurerm_role_definition", "azurerm_federated_identity_credential",
+		"azurerm_user_assigned_identity", "azuread_service_principal", "azuread_application",
+		"azuread_application_federated_identity_credential", "azuread_group", "azuread_group_member",
+		"aws_iam_role", "google_project_iam_member", "github_team_members", "github_repository_collaborator",
+		"github_actions_repository_permissions", "github_actions_repository_oidc_subject_claim_customization_template", "",
+	} {
+		if gate(typ) {
+			t.Errorf("gate(%q) = true, want false", typ)
+		}
+	}
+}
+
 // blocksOf projects terraformBlocks' lines to their block types.
 func blocksOf(lines []tfLine) []string {
 	out := make([]string, len(lines))
@@ -398,7 +435,7 @@ func TestReadmeListsConsequences(t *testing.T) {
 	cons := section("### Consequences")
 	for _, c := range builtinConsequences {
 		names := append(append(append([]string{c.class}, c.patterns...), c.keys...), c.commands...)
-		names = append(append(names, c.operations...), c.removed...)
+		names = append(append(append(names, c.operations...), c.removed...), c.gates...)
 		for _, r := range c.secrets {
 			names = append(names, r.name)
 		}
@@ -429,6 +466,9 @@ func TestReadmeListsConsequences(t *testing.T) {
 	}
 	if !strings.Contains(cons, "| `access_widened` | High |") || !strings.Contains(cons, "added at head") {
 		t.Error("README Consequences does not give access_widened its High row and rule")
+	}
+	if !strings.Contains(cons, "A delivery gate does not widen.") {
+		t.Error("README Consequences does not say a delivery gate does not widen")
 	}
 	if !strings.Contains(cons, "| `secret_added` | High |") || !strings.Contains(cons, "**Added secrets.**") {
 		t.Error("README Consequences does not give secret_added its High row and rules")
