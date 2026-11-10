@@ -11,12 +11,18 @@ import (
 
 // File is one changed file and its line counts.
 type File struct {
-	Path    string  `json:"path"`               // path at head, slash-separated, repo-relative
-	OldPath string  `json:"old_path,omitempty"` // path at base when renamed
-	Added   int     `json:"added"`
-	Removed int     `json:"removed"`
-	Binary  bool    `json:"binary,omitempty"`  // git reported no line counts; Added and Removed are 0
-	New     bool    `json:"new,omitempty"`     // absent at the merge base; every line in Added is new code
+	Path    string `json:"path"`               // path at head, slash-separated, repo-relative
+	OldPath string `json:"old_path,omitempty"` // path at base when renamed
+	Added   int    `json:"added"`
+	Removed int    `json:"removed"`
+	Binary  bool   `json:"binary,omitempty"` // git reported no line counts; Added and Removed are 0
+	New     bool   `json:"new,omitempty"`    // absent at the merge base; every line in Added is new code
+	// Absent at head and not a rename: Added is 0 and every removed line was
+	// existing code.
+	Deleted bool `json:"deleted,omitempty"`
+	// A deleted file only: the import path of the Go package impact counts it
+	// under (its Impact.Packages entry); "" when impact counts it as a file.
+	Package string  `json:"package,omitempty"`
 	Classes []Class `json:"classes,omitempty"` // path classes from Classify; nil when none
 	// The unpaired language read from the file's content when its path names
 	// none: "Shell" for an extensionless file whose first line is a shell

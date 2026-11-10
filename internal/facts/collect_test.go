@@ -129,7 +129,7 @@ func TestCollect(t *testing.T) {
 			{Path: "cli/run.go", Added: 3, New: true},
 			{Path: "docs/guide/new.md", OldPath: "docs/old.md", Added: 1, Classes: []Class{ClassDocs}},
 			{Path: "logo.png", Binary: true},
-			{Path: "svc/Program.cs", Removed: 3},
+			{Path: "svc/Program.cs", Removed: 3, Deleted: true},
 			{Path: "web/src/new.js", Added: 4, New: true},
 			{Path: "web/src/new.test.js", Added: 1, New: true, Classes: []Class{ClassTest}},
 		},

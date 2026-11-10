@@ -253,3 +253,16 @@ func TestCollectImpactNoPaths(t *testing.T) {
 		t.Errorf("CollectImpact(no paths) = %+v, want %+v", got, want)
 	}
 }
+
+func TestScanPackages(t *testing.T) {
+	s := newScan([]string{"core/old.go", "nomod/x/y.txt", "web/a.js"})
+	for _, f := range [][2]string{
+		{"go.mod", "module example.com/m\n"},
+		{"core/keep.go", goFile("core")},
+	} {
+		s.add(f[0], []byte(f[1]))
+	}
+	if got, want := s.packages(), map[string]string{"core/old.go": "example.com/m/core"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("packages = %v, want %v", got, want)
+	}
+}

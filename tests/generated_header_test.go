@@ -43,6 +43,8 @@ func generatedHeaderFixture(t *testing.T) string {
 // TestGeneratedHeaderLeftOutOfScore: a changed file whose head blob carries a
 // generated marker in its header is classed generated and left out of size,
 // degree and untested; a marker after code, or in a deleted file, is not read.
+// The deleted old/gen.go keeps no classes, but it is a whole package nothing
+// imports at head, so it is left out as a deleted file nothing depends on.
 func TestGeneratedHeaderLeftOutOfScore(t *testing.T) {
 	f, res, err := collectAndScore(t, generatedHeaderFixture(t))
 	if err != nil {
@@ -72,9 +74,10 @@ func TestGeneratedHeaderLeftOutOfScore(t *testing.T) {
 		t.Fatalf("no %s in %+v", measure, res.Breakdown)
 		return score.Point{}
 	}
-	kept := []string{"old/gen.go", "src/app.go"}
-	if p := point(score.MeasureSize); !reflect.DeepEqual(p.Excluded, []string{"api/client.go", "ext/tool.ts"}) || !reflect.DeepEqual(p.From, kept) {
-		t.Errorf("size from %v excluded %v, want from %v excluded [api/client.go ext/tool.ts]", p.From, p.Excluded, kept)
+	kept := []string{"src/app.go"}
+	excluded := []string{"api/client.go", "ext/tool.ts", "old/gen.go"}
+	if p := point(score.MeasureSize); !reflect.DeepEqual(p.Excluded, excluded) || !reflect.DeepEqual(p.From, kept) {
+		t.Errorf("size from %v excluded %v, want from %v excluded %v", p.From, p.Excluded, kept, excluded)
 	}
 	if p := point(score.MeasureDegree); !reflect.DeepEqual(p.From, kept) {
 		t.Errorf("degree from %v, want %v", p.From, kept)

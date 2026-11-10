@@ -55,3 +55,22 @@ func TestMarkNew(t *testing.T) {
 		t.Errorf("New flags = %v, want %v", got, want)
 	}
 }
+
+func TestMarkDeleted(t *testing.T) {
+	files := []File{
+		{Path: "kept.go", Added: 1},               // modified
+		{Path: "made.go", Added: 3},               // added
+		{Path: "gone.go", Removed: 4},             // deleted: absent at head
+		{Path: "moved/to.go", OldPath: "from.go"}, // rename: head path at head
+		{Path: "dir", Removed: 1},                 // a file at base, a directory at head
+	}
+	atHead := map[string]bool{"kept.go": true, "made.go": true, "moved/to.go": true, "dir/inner.go": true}
+	markDeleted(files, atHead)
+	var got []bool
+	for _, f := range files {
+		got = append(got, f.Deleted)
+	}
+	if want := []bool{false, false, true, false, true}; !reflect.DeepEqual(got, want) {
+		t.Errorf("Deleted flags = %v, want %v", got, want)
+	}
+}

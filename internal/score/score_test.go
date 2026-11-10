@@ -814,3 +814,96 @@ func TestRepoClassFloorsLevel(t *testing.T) {
 		t.Errorf("consequences = %+v, want identity_rights then release_guard", got.Consequences)
 	}
 }
+
+// TestDeletedFileNothingDependsOn pins that a deleted file whose impact entry
+// (for a Go file, its package's entry) has 0 dependents is left out of size,
+// degree and tests and listed in size's Excluded, and that every other file
+// counts in full.
+func TestDeletedFileNothingDependsOn(t *testing.T) {
+	js := facts.File{Path: "old/a.js", Removed: 300, Deleted: true}
+	gone := facts.File{Path: "core/old.go", Removed: 300, Deleted: true, Package: "example.com/m/core"}
+	modified := facts.File{Path: "old/a.js", Removed: 300}
+	files := func(name string, n int) facts.Impact {
+		return facts.Impact{Packages: []facts.Dependency{}, Files: []facts.Dependency{{Name: name, Dependents: n}}}
+	}
+	pkgs := func(name string, n int) facts.Impact {
+		return facts.Impact{Packages: []facts.Dependency{{Name: name, Dependents: n}}, Files: []facts.Dependency{}}
+	}
+	tests := []struct {
+		name   string
+		file   facts.File
+		impact facts.Impact
+		out    bool // left out of size, degree and tests
+	}{
+		{"deleted, file entry 0", js, files("old/a.js", 0), true},
+		{"deleted, file entry 2", js, files("old/a.js", 2), false},
+		{"deleted Go file, package entry 0", gone, pkgs("example.com/m/core", 0), true},
+		{"deleted Go file, package entry 4", gone, pkgs("example.com/m/core", 4), false},
+		{"deleted Go file, only a file entry 0", gone, files("core/old.go", 0), false},
+		{"deleted, no impact entry", js, files("other.js", 0), false},
+		{"modified, file entry 0", modified, files("old/a.js", 0), false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := Score(facts.Facts{Files: []facts.File{tt.file}, Impact: tt.impact}, Default())
+			size := entry(t, r, MeasureSize, "lines")
+			deg := entry(t, r, MeasureDegree, "existing_lines")
+			untested := entry(t, r, MeasureTests, "untested_production_files")
+			if tt.out {
+				if size.Value != 0 || size.Points != 0 || len(size.From) != 0 || !reflect.DeepEqual(size.Excluded, []string{tt.file.Path}) {
+					t.Errorf("size = %+v, want 0 with Excluded [%s]", size, tt.file.Path)
+				}
+				if deg.Value != 0 || deg.Points != 0 || len(deg.From) != 0 {
+					t.Errorf("degree = %+v, want 0", deg)
+				}
+				if untested.Value != 0 || untested.Points != 0 {
+					t.Errorf("tests = %+v, want 0", untested)
+				}
+				return
+			}
+			want := []string{tt.file.Path}
+			if size.Value != 300 || size.Points != 10 || !reflect.DeepEqual(size.From, want) || size.Excluded != nil {
+				t.Errorf("size = %+v, want 300 (10) from %v, nothing excluded", size, want)
+			}
+			if deg.Value != 300 || deg.Points != 10 || !reflect.DeepEqual(deg.From, want) {
+				t.Errorf("degree = %+v, want 300 (10) from %v", deg, want)
+			}
+			if untested.Value != 1 || untested.Points != 10 || !reflect.DeepEqual(untested.From, want) {
+				t.Errorf("tests = %+v, want 1 (10) from %v", untested, want)
+			}
+		})
+	}
+}
+
+// TestDeletedFileKeepsFloorsSpreadAndImpact pins that leaving a deleted file
+// out of size changes neither spread, impact nor any floor on its path.
+func TestDeletedFileKeepsFloorsSpreadAndImpact(t *testing.T) {
+	f := facts.Facts{
+		Files:       []facts.File{{Path: "iam/roles.tf", Removed: 900, Deleted: true}},
+		Directories: []string{"iam"},
+		Projects:    []string{},
+		Impact:      facts.Impact{Packages: []facts.Dependency{}, Files: []facts.Dependency{{Name: "iam/roles.tf"}}},
+		Consequences: []facts.Consequence{
+			{Class: facts.ConsequenceIdentityRights, Paths: []string{"iam/roles.tf"}, Types: []string{}},
+		},
+	}
+	r := Score(f, Default())
+	if size := entry(t, r, MeasureSize, "lines"); size.Value != 0 || !reflect.DeepEqual(size.Excluded, []string{"iam/roles.tf"}) {
+		t.Errorf("size = %+v, want 0 with iam/roles.tf excluded", size)
+	}
+	if files := entry(t, r, MeasureSpread, "files"); files.Value != 1 || !reflect.DeepEqual(files.From, []string{"iam/roles.tf"}) {
+		t.Errorf("spread files = %+v, want 1 from iam/roles.tf", files)
+	}
+	if imp := entry(t, r, MeasureImpact, "dependents"); !reflect.DeepEqual(imp.From, []string{"iam/roles.tf"}) {
+		t.Errorf("impact = %+v, want iam/roles.tf counted", imp)
+	}
+	if r.ShapeLevel != Low || r.Level != Medium || !reflect.DeepEqual(r.FlooredBy, []string{facts.ConsequenceIdentityRights}) {
+		t.Errorf("shape %s level %s floored by %v, want Low, Medium by identity_rights", r.ShapeLevel, r.Level, r.FlooredBy)
+	}
+
+	rules := Default()
+	rules.RepoClasses = []RepoClass{{Class: "legacy", Paths: []string{"iam/**"}, Floor: High}}
+	if r := Score(f, rules); r.Level != High {
+		t.Errorf("with a repo class on iam/**: level %s, want High", r.Level)
+	}
+}

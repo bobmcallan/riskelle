@@ -38,7 +38,7 @@ type Point struct {
 	Min      int      `json:"min"`                // lower edge of the band it fell in
 	Points   int      `json:"points"`             // the band's points
 	From     []string `json:"from"`               // paths, directories or projects counted; sorted, non-nil
-	Excluded []string `json:"excluded,omitempty"` // size and impact: paths left out by class; sorted
+	Excluded []string `json:"excluded,omitempty"` // size and impact: paths left out by class, or (size) as a deleted file nothing depends on; sorted
 
 	// Impact only: each counted package or file and its dependent count,
 	// sorted by name.
@@ -94,13 +94,13 @@ func Score(f facts.Facts, r Rules) Result {
 	for _, file := range f.Files {
 		paths = append(paths, file.Path)
 	}
+	kept, excluded := counted(f.Files, f.Impact, r)
 	breakdown := []Point{
-		size(f.Files, r),
+		size(kept, excluded, r),
 		point(MeasureSpread, "files", paths, r.SpreadFiles),
 		point(MeasureSpread, "directories", f.Directories, r.SpreadDirs),
 		point(MeasureSpread, "projects", f.Projects, r.SpreadProjs),
 	}
-	kept, _ := counted(f.Files, r)
 	breakdown = append(breakdown, degree(kept, r))
 	breakdown = append(breakdown, branchAge(f, r)...)
 	breakdown = append(breakdown, untested(f.Files, kept, f.TestLanguages, r))
@@ -234,10 +234,12 @@ func floored(l Level, cs []Consequence, edges []LevelEdge) Level {
 	return l
 }
 
-// counted splits files into those in none of the rules' excluded classes and
-// the paths of the rest. Size, degree and tests all count only the kept files.
-// A path matching the rules' Generated globs counts as generated.
-func counted(files []facts.File, r Rules) (kept []facts.File, excluded []string) {
+// counted splits files into those size, degree and tests count and the paths
+// of the rest. A file is left out when it is in one of the rules' excluded
+// classes, when its path matches the rules' Generated globs (it counts as
+// generated), or when it is a deleted file nothing at head depends on
+// (unused). Size, degree and tests all count only the kept files.
+func counted(files []facts.File, imp facts.Impact, r Rules) (kept []facts.File, excluded []string) {
 	ex := map[facts.Class]bool{}
 	for _, c := range r.SizeExcludes {
 		ex[c] = true
@@ -247,7 +249,7 @@ func counted(files []facts.File, r Rules) (kept []facts.File, excluded []string)
 		generated = facts.CompileGlobs(r.Generated)
 	}
 	for _, file := range files {
-		if anyExcluded(file.Classes, ex) || generated.Match(file.Path) {
+		if anyExcluded(file.Classes, ex) || generated.Match(file.Path) || unused(file, imp) {
 			excluded = append(excluded, file.Path)
 			continue
 		}
@@ -256,10 +258,28 @@ func counted(files []facts.File, r Rules) (kept []facts.File, excluded []string)
 	return kept, excluded
 }
 
-// size sums the lines added and removed in every file in none of the rules'
-// excluded classes.
-func size(files []facts.File, r Rules) Point {
-	kept, excluded := counted(files, r)
+// unused reports whether file is a deleted file nothing at head depends on:
+// its impact entry (for a Go file, its package's entry) has 0 dependents. A
+// deleted file with no entry counts, since nothing shows that it is unused.
+func unused(file facts.File, imp facts.Impact) bool {
+	if !file.Deleted {
+		return false
+	}
+	name, deps := file.Path, imp.Files
+	if file.Package != "" {
+		name, deps = file.Package, imp.Packages
+	}
+	for _, d := range deps {
+		if d.Name == name {
+			return d.Dependents == 0
+		}
+	}
+	return false
+}
+
+// size sums the lines added and removed in the kept files, recording the
+// paths counted() left out.
+func size(kept []facts.File, excluded []string, r Rules) Point {
 	p := Point{Measure: MeasureSize, Fact: "lines", From: []string{}, Excluded: excluded}
 	for _, file := range kept {
 		p.Value += file.Added + file.Removed

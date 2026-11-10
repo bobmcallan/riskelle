@@ -37,3 +37,13 @@ func markNew(files []File, atBase map[string]bool) {
 		files[i].New = files[i].OldPath == "" && !atBase[files[i].Path]
 	}
 }
+
+// markDeleted sets Deleted on every file absent from the head tree, given as
+// the set of paths it holds. A rename's head path is at head, and so is an
+// added or modified file, so none of them is ever deleted; a file at base that
+// became a directory at head is.
+func markDeleted(files []File, atHead map[string]bool) {
+	for i := range files {
+		files[i].Deleted = files[i].OldPath == "" && !atHead[files[i].Path]
+	}
+}

@@ -62,6 +62,7 @@ func Collect(ctx context.Context, repo, base, head string) (Facts, error) {
 
 	roots := map[string]bool{}
 	atBase := map[string]bool{}
+	atHead := map[string]bool{}
 	testLangs := []string{}
 	for _, commit := range []string{mergeBase, headSHA} {
 		paths, err := treePaths(ctx, repo, commit)
@@ -76,10 +77,14 @@ func Collect(ctx context.Context, repo, base, head string) (Facts, error) {
 				atBase[p] = true
 			}
 		} else {
+			for _, p := range paths {
+				atHead[p] = true
+			}
 			testLangs = TestLanguages(paths)
 		}
 	}
 	markNew(files, atBase)
+	markDeleted(files, atHead)
 
 	// Spread counts where the change leaves each file: a rename counts in its
 	// head directory and project only. Impact still checks the old path, since
@@ -92,9 +97,14 @@ func Collect(ctx context.Context, repo, base, head string) (Facts, error) {
 			touched = append(touched, f.OldPath)
 		}
 	}
-	impact, err := CollectImpact(ctx, repo, headSHA, touched)
+	impact, pkgs, err := collectImpact(ctx, repo, headSHA, touched)
 	if err != nil {
 		return Facts{}, err
+	}
+	for i := range files {
+		if files[i].Deleted {
+			files[i].Package = pkgs[files[i].Path]
+		}
 	}
 	return Facts{
 		Base:        baseSHA,

@@ -26,12 +26,19 @@ import (
 // that refer to it (see references). Only the git objects of commit are read,
 // never the working tree, so uncommitted files cannot change the counts.
 func CollectImpact(ctx context.Context, repo, commit string, paths []string) (Impact, error) {
+	imp, _, err := collectImpact(ctx, repo, commit, paths)
+	return imp, err
+}
+
+// collectImpact is CollectImpact that also maps each changed path impact
+// counts under a Go package to that package's import path.
+func collectImpact(ctx context.Context, repo, commit string, paths []string) (Impact, map[string]string, error) {
 	if len(paths) == 0 {
-		return emptyImpact(), nil
+		return emptyImpact(), nil, nil
 	}
 	blobs, err := treeBlobs(ctx, repo, commit)
 	if err != nil {
-		return Impact{}, err
+		return Impact{}, nil, err
 	}
 	var mods, gos, others []blob
 	for _, b := range blobs {
@@ -50,16 +57,16 @@ func CollectImpact(ctx context.Context, repo, commit string, paths []string) (Im
 	// Modules first, so the changed paths split into packages and files; the
 	// non-Go blobs are read only when some changed file needs its referrers.
 	if err := catBlobs(ctx, repo, mods, s.add); err != nil {
-		return Impact{}, err
+		return Impact{}, nil, err
 	}
 	rest := gos
 	if len(s.changedFiles()) > 0 {
 		rest = append(rest, others...)
 	}
 	if err := catBlobs(ctx, repo, rest, s.add); err != nil {
-		return Impact{}, err
+		return Impact{}, nil, err
 	}
-	return s.result(), nil
+	return s.result(), s.packages(), nil
 }
 
 func emptyImpact() Impact {
@@ -241,6 +248,17 @@ func (s *scan) pkgOf(p string) (importPath, dir string) {
 	}
 }
 
+// packages maps each changed path that names a Go package to its import path.
+func (s *scan) packages() map[string]string {
+	out := map[string]string{}
+	for _, p := range s.changed {
+		if ip, _ := s.pkgOf(p); ip != "" {
+			out[p] = ip
+		}
+	}
+	return out
+}
+
 // changedFiles returns the changed paths that are files rather than packages.
 func (s *scan) changedFiles() []string {
 	var files []string
@@ -256,10 +274,8 @@ func (s *scan) changedFiles() []string {
 func (s *scan) result() Impact {
 	imp := emptyImpact()
 	pkgs := map[string]string{} // import path -> directory
-	for _, p := range s.changed {
-		if ip, dir := s.pkgOf(p); ip != "" {
-			pkgs[ip] = dir
-		}
+	for p, ip := range s.packages() {
+		pkgs[ip] = path.Dir(p)
 	}
 	for ip, dir := range pkgs {
 		n := 0

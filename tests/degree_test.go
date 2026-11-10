@@ -13,7 +13,8 @@ import (
 // TestCollectDegreeSplitsExistingFromNewCode drives collection against a
 // fixture repository whose branch modifies, deletes and creates files, and
 // whose trunk later adds a file at the path the branch created. It pins the
-// per-file new markers and the degree split in their JSON form, over two runs.
+// per-file new and deleted markers (a deleted Go file names its package) and
+// the degree split in their JSON form, over two runs.
 func TestCollectDegreeSplitsExistingFromNewCode(t *testing.T) {
 	dir := t.TempDir()
 	fixtureGit(t, dir, "init", "--quiet", "--initial-branch=main")
@@ -56,7 +57,7 @@ func TestCollectDegreeSplitsExistingFromNewCode(t *testing.T) {
 	}
 
 	want := `[{"path":"core/calc.go","added":2,"removed":1},` +
-		`{"path":"core/legacy.go","added":0,"removed":4},` +
+		`{"path":"core/legacy.go","added":0,"removed":4,"deleted":true,"package":"example.com/m/core"},` +
 		`{"path":"feature/flag.go","added":5,"removed":0,"new":true}]` + "\n" +
 		`{"existing":{"added":2,"removed":5},"new":{"added":5,"removed":0}}`
 	if runs[0] != want {

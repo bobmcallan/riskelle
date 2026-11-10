@@ -119,3 +119,14 @@ func TestFileLanguageJSON(t *testing.T) {
 		t.Errorf("JSON: %s; %s", plain, script)
 	}
 }
+
+func TestFileJSONDeletedAndPackage(t *testing.T) {
+	gone, _ := json.Marshal(File{Path: "a.go", Removed: 1, Deleted: true, Package: "example.com/m"})
+	if want := `{"path":"a.go","added":0,"removed":1,"deleted":true,"package":"example.com/m"}`; string(gone) != want {
+		t.Errorf("deleted JSON = %s, want %s", gone, want)
+	}
+	kept, _ := json.Marshal(File{Path: "a.go", Added: 1})
+	if strings.Contains(string(kept), "deleted") || strings.Contains(string(kept), "package") {
+		t.Errorf("modified JSON = %s, want neither deleted nor package", kept)
+	}
+}
