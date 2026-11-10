@@ -24,6 +24,15 @@
     consequence classes (such as identity and rights grants) is detected
     mechanically from the diff. Each class sets a band floor, never a discount:
     the level is the higher of the shape level and every floor.
+  - *What the levels mean.* High is destructive if it goes wrong: hard or
+    impossible to undo, or harm to production, customers, their data or
+    security, which a revert of the merge does not put right. Medium is risky
+    but a revert puts it right. Low is small, tested and revertible.
+  - Shape scores the total in full, but its level caps at Medium: volume alone
+    (size, spread, degree, impact, age, untested files) is never destructive.
+    Only a consequence with a High floor makes a change High: a built-in
+    destructive class, a production root, or a repo class. Each lists its
+    evidence (paths and the matched types) in the report.
   - A repo may add classes or name its production roots in `.risk/rules.json`.
     These may only raise a floor.
   - Splitting a change cannot lower a floor: the class lands in whichever change
