@@ -144,7 +144,7 @@ or absolute glob are refused by name: a repo class can only raise the level.
 
 | Class | Floor | Read from |
 | --- | --- | --- |
-| `access_widened` | High | A line added at head that carries `identity_rights` outside a delivery gate: a grant of identity rights added or altered, a variable it uses included; the same paths and types. Never a removed line, a delivery-gate line, a `description` or `display_name` label, a line of a new `azuread_application` or `azuread_service_principal` that holds nothing, or a line that changed only in whitespace or a comment |
+| `access_widened` | High | A line added at head that carries `identity_rights` outside a delivery gate: a grant of identity rights added or altered, a variable it uses included; the same paths and types. Never a removed line, a delivery-gate line, a `description` or `display_name` label, a line of a new `azuread_application` or `azuread_service_principal` that holds nothing, a line of an `azurerm_role_assignment` whose own `scope` is a direct reference to one resource, or a line that changed only in whitespace or a comment |
 | `definition_update` | Medium | Added lines of any text file but docs and tests (class `test`): a logical shell command that is `az devops invoke` with `--area release` or `build`, `--resource definitions` and an `--http-method` of `PUT` or `PATCH`; `az pipelines` directly followed by `update`; or `curl`, `az rest` or `Invoke-RestMethod` with `PUT` or `PATCH` against a URL containing `_apis/release/definitions` or `_apis/build/definitions` |
 | `definition_write` | High | Added lines of any text file but docs and tests (class `test`): every other write by the same commands. `az devops invoke` with `--area release` or `build` and an `--http-method` of `POST` or `DELETE`, or of `PUT` or `PATCH` with a `--resource` other than `definitions` or none; `az pipelines` directly followed by `create` or `delete`; `az pipelines release` directly followed by `create`, `update` or `delete`; or `curl`, `az rest` or `Invoke-RestMethod` with `POST` or `DELETE` against a URL containing `_apis/release/definitions` or `_apis/build/definitions` |
 | `destructive_migration` | High | Added lines of an EF Core migration (`**/Migrations/**/*.cs`): the `migrationBuilder` calls `DeleteData`, `DropColumn`, `DropSchema`, `DropTable`, `RenameColumn`, `RenameTable`; added lines of a migration or a `.sql` file: `DROP TABLE`, `DROP COLUMN`, `DROP SCHEMA`, `DROP DATABASE`, `DROP VIEW`, `TRUNCATE`, `DELETE FROM`, `ALTER TABLE DROP` (`ALTER TABLE ... DROP`) |
@@ -231,6 +231,23 @@ or absolute glob are refused by name: a repo class can only raise the level.
   string: any other scope (a service connection, a library, an agent pool, a
   project), or one given as a variable, a local or an expression, stays
   `access_widened`. Which role or permission is granted is not read.
+- A role on one resource does not widen. A line of an
+  `azurerm_role_assignment` whose own `scope` line is a direct reference to
+  one resource, `scope = azurerm_<type>.<name>.id` or
+  `scope = data.azurerm_<type>.<name>.id`, with at most one index after the
+  name (`[each.key]`, a plain string or an integer) and nothing after it but
+  a comment, carries `identity_rights` (Medium) but never `access_widened`: a
+  failure on one resource is put right by a revert of the merge. A container
+  is not one resource: `azurerm_resource_group`, `azurerm_subscription`,
+  `azurerm_subscriptions`, `azurerm_management_group`,
+  `azurerm_client_config` and `azurerm_resources` stay `access_widened`. So
+  does every other scope: a variable, a local, `each.value`, a string literal
+  (even a full resource id), an interpolation, an expression, a multi-line
+  value or no scope. A changed variable the block uses still widens
+  (`<type> via var.X`), and which role is granted is not read. Production is
+  never read from the scope or from any name: a repo puts the role on a
+  production resource in a file under one of its production roots, which
+  raises `identity_rights` to High.
 - Creating an identity is not a grant. A new `azuread_application` or
   `azuread_service_principal` resource block (those exact types) that holds
   nothing carries `identity_rights` (Medium) but never `access_widened`: its
@@ -641,8 +658,8 @@ a JSON plan file that predicts the change:
   release or build definition names `definition_update`, and any other
   planned definition write names `definition_write`. A planned path that adds or alters a grant
   names both, `"consequences": ["identity_rights", "access_widened"]`; one
-  that only creates an identity that holds nothing names `identity_rights`
-  alone. A
+  that only creates an identity that holds nothing, or a role assignment
+  scoped to one resource, names `identity_rights` alone. A
   planned change to a pipeline that deploys to production names
   `"production_deploy"`, and a planned path that removes a stateful resource
   names `stateful_destroy`. An

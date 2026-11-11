@@ -34,8 +34,9 @@ const (
 // kept. Both lists are sorted,
 // distinct and non-nil; Types is empty for a plan, which has no content.
 // access_widened carries the paths and types of the identity_rights lines
-// added at head that carried it, less those in a label attribute or a
-// delivery gate.
+// added at head that carried it, less those in a label attribute, a
+// delivery gate, a block scoped to one resource or a new block that only
+// creates an identity.
 type Consequence struct {
 	Class string   `json:"class"`
 	Paths []string `json:"paths"`
@@ -82,6 +83,16 @@ type Consequence struct {
 // types and a federated credential widen wherever a line of theirs is added,
 // whatever for_each gives them, since no expression is evaluated.
 //
+// A role on one resource does not widen either (oneResource): a block of an
+// exact type whose own scope line is a direct reference to one resource of
+// the provider, not to a container that holds many (a resource group, a
+// subscription, a management group). A failure on one resource is put right
+// by a revert of the merge. Which resource is production is never read from
+// the scope: a repo names its production roots, and a production root raises
+// identity_rights to High. Every other scope (a variable, a local, each.value,
+// a string, an expression, a container) widens, and so does a changed
+// variable the block uses, which no scope is read for.
+//
 // definition_update is a script that updates an existing release or build
 // definition out of band, with a PUT or PATCH: the service keeps every
 // revision, so restoring the prior one puts a failed update right.
@@ -100,19 +111,20 @@ type Consequence struct {
 // block, removed from its directory, destroys data (destroy.go). Exact names:
 // configuration-only types beside them destroy nothing.
 var builtinConsequences = []struct {
-	class      string
-	patterns   []string
-	keys       []string
-	commands   []string             // the command forms a definition_update or definition_write type starts with
-	operations []string             // the operation types destructiveOperations reports
-	attributes map[string][]string  // exact type: the top-level attributes whose lines carry the class
-	widens     string               // the class this one accompanies on a line added at head
-	labels     []string             // the top-level attributes on whose lines a widening class does not accompany
-	gates      []string             // the block types whose lines a widening class does not accompany: delivery gates
-	gateWhen   map[string][2]string // exact type: the top-level attribute and the literal value it must hold for the block to be a delivery gate
-	creates    map[string][]string  // exact resource type: the top-level attributes that give a new block something; a new block with none of them does not carry a widening class
-	removed    []string             // resource types whose block removed from its directory carries the class
-	secrets    []secretRule         // the rules whose match on a line added at head carries the class
+	class       string
+	patterns    []string
+	keys        []string
+	commands    []string                 // the command forms a definition_update or definition_write type starts with
+	operations  []string                 // the operation types destructiveOperations reports
+	attributes  map[string][]string      // exact type: the top-level attributes whose lines carry the class
+	widens      string                   // the class this one accompanies on a line added at head
+	labels      []string                 // the top-level attributes on whose lines a widening class does not accompany
+	gates       []string                 // the block types whose lines a widening class does not accompany: delivery gates
+	gateWhen    map[string][2]string     // exact type: the top-level attribute and the literal value it must hold for the block to be a delivery gate
+	creates     map[string][]string      // exact resource type: the top-level attributes that give a new block something; a new block with none of them does not carry a widening class
+	oneResource map[string]resourceScope // exact type: the top-level attribute whose direct reference to one resource keeps a widening class off the block's lines
+	removed     []string                 // resource types whose block removed from its directory carries the class
+	secrets     []secretRule             // the rules whose match on a line added at head carries the class
 }{
 	{class: ConsequenceAccessWidened, widens: ConsequenceIdentityRights, labels: []string{"description", "display_name"}, gates: []string{
 		"azuredevops_branch_policy_*",
@@ -135,6 +147,13 @@ var builtinConsequences = []struct {
 		"azuread_application": {"password", "required_resource_access"},
 		// it adopts a principal that already exists and may hold rights
 		"azuread_service_principal": {"use_existing"},
+	}, oneResource: map[string]resourceScope{
+		// a role on one resource, not on a group, subscription or management
+		// group that holds many
+		"azurerm_role_assignment": {attr: "scope", provider: "azurerm_", containers: []string{
+			"azurerm_client_config", "azurerm_management_group", "azurerm_resource_group",
+			"azurerm_resources", "azurerm_subscription", "azurerm_subscriptions",
+		}},
 	}},
 	{class: ConsequenceDefinitionUpdate, commands: []string{
 		"az devops invoke", "az pipelines", "az rest", "curl", "Invoke-RestMethod",
@@ -322,6 +341,53 @@ func scopedGate(lines []tfLine, text []string, i int) bool {
 				return m[2] == when[1]
 			}
 		}
+	}
+	return false
+}
+
+// resourceScope is the attribute of a block whose direct reference to one
+// resource keeps a widening class off the block's lines (oneResource): the
+// type prefix the referenced type must carry, and the types under it that
+// hold many resources.
+type resourceScope struct {
+	attr, provider string
+	containers     []string
+}
+
+// resourceRef matches a top-level attribute line whose whole value is a
+// direct reference to the id of one resource or data source, capturing the
+// attribute and the referenced type: type.name.id or data.type.name.id, with
+// at most one index after the name ([each.key], a plain string or an integer)
+// and nothing after it but a comment.
+var resourceRef = regexp.MustCompile(`^[ \t]*([A-Za-z_][A-Za-z0-9_-]*)[ \t]*=[ \t]*(?:data\.)?([A-Za-z][A-Za-z0-9_]*)\.[A-Za-z_][A-Za-z0-9_-]*(?:\[(?:each\.key|"[^"$%\\]*"|[0-9]+)\])?\.id[ \t\r]*(?:(?:#|//).*)?$`)
+
+// oneResource reports whether line i is in a block the catalog keeps from
+// widening by its scope (oneResource): the block has exactly one line in the
+// catalogued attribute, and it is a direct reference (resourceRef) to a type
+// of the provider that is not a container. Only the block's own lines are
+// read: a variable, a local, each.value, a string, an expression, a
+// multi-line value or a missing attribute is no reference to one resource.
+func oneResource(lines []tfLine, text []string, i int) bool {
+	l := lines[i]
+	if l.start == 0 {
+		return false
+	}
+	for _, c := range builtinConsequences {
+		rs, ok := c.oneResource[l.block]
+		if !ok {
+			continue
+		}
+		var found []int
+		for j := l.start; j < len(lines) && lines[j].start == l.start; j++ {
+			if lines[j].attr == rs.attr && !lines[j].inert {
+				found = append(found, j)
+			}
+		}
+		if len(found) != 1 {
+			return false
+		}
+		m := resourceRef.FindStringSubmatch(text[found[0]])
+		return m != nil && m[1] == rs.attr && strings.HasPrefix(m[2], rs.provider) && !slices.Contains(rs.containers, m[2])
 	}
 	return false
 }
@@ -757,8 +823,8 @@ func filePatch(ctx context.Context, repo, mergeBase, head string, f File) ([]byt
 // one added) also adds each class that widens it, access_widened for
 // identity_rights, with the same path and type; the merge-base side adds
 // none, and neither does a line in a label attribute (label), in a
-// delivery gate (gate) or in a new block that only creates an identity
-// (created). In a .tf or
+// delivery gate (gate), in a block scoped to one resource (oneResource) or in
+// a new block that only creates an identity (created). In a .tf or
 // .tfvars file a restyled line (restyledLines) is not a changed line at
 // either side, and an inert one (blank or a full-line comment) carries no
 // class and sets no variable. A catalogued resource block whose address leaves its directory adds
@@ -934,7 +1000,7 @@ func collectConsequences(ctx context.Context, repo, mergeBase, head string, file
 				if l.block == "" {
 					continue
 				}
-				widen := at.added && !label(l) && !inGate(lines, text, n-1) && !created(lines, added, n-1)
+				widen := at.added && !label(l) && !inGate(lines, text, n-1) && !oneResource(lines, text, n-1) && !created(lines, added, n-1)
 				for _, class := range consequencesOf(l.block) {
 					hit(class, p, l.block, widen)
 				}

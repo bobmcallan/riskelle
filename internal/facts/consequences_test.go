@@ -257,6 +257,71 @@ func TestScopedGate(t *testing.T) {
 	}
 }
 
+// TestOneResourceScope pins the role assignments scoped to one resource: the
+// block's own scope line is a direct reference to one resource of the
+// provider that is not a container. Their lines carry identity_rights but
+// never access_widened; every other scope widens.
+func TestOneResourceScope(t *testing.T) {
+	block := func(typ string, body ...string) []string {
+		return append(append([]string{`resource "` + typ + `" "x" {`}, body...), `  role_definition_name = "Reader"`, `}`)
+	}
+	const role = "azurerm_role_assignment"
+	scope := func(v string) []string { return block(role, `  scope = `+v) }
+	for _, tt := range []struct {
+		name string
+		src  []string
+		want bool
+	}{
+		{"a resource", scope(`azurerm_key_vault.kv.id`), true},
+		{"a keyed data source", scope(`data.azurerm_linux_web_app.site[each.key].id`), true},
+		{"a string index", scope(`azurerm_key_vault.kv["one"].id`), true},
+		{"an integer index", scope(`azurerm_key_vault.kv[0].id`), true},
+		{"with a trailing comment", scope(`azurerm_key_vault.kv.id # one vault`), true},
+		{"after for_each", block(role, `  for_each = local.sites`, ``, `  scope    = data.azurerm_linux_web_app.site[each.key].id`), true},
+		{"a variable", scope(`var.scope`), false},
+		{"a local", scope(`local.scope`), false},
+		{"each.value.scope", scope(`each.value.scope`), false},
+		{"each.value", scope(`each.value`), false},
+		{"a resource id string", scope(`"/subscriptions/0000/resourceGroups/g/providers/Microsoft.Web/sites/s"`), false},
+		{"an interpolation", scope(`"${azurerm_key_vault.kv.id}"`), false},
+		{"a resource group", scope(`azurerm_resource_group.g.id`), false},
+		{"a resource group data source", scope(`data.azurerm_resource_group.g.id`), false},
+		{"a subscription", scope(`data.azurerm_subscription.s.id`), false},
+		{"subscriptions", scope(`data.azurerm_subscriptions.s.id`), false},
+		{"a management group", scope(`azurerm_management_group.m.id`), false},
+		{"the client config", scope(`data.azurerm_client_config.c.id`), false},
+		{"resources", scope(`data.azurerm_resources.r.id`), false},
+		{"another provider", scope(`azuread_group.g.id`), false},
+		{"a module output", scope(`module.m.id`), false},
+		{"not the id", scope(`azurerm_key_vault.kv.name`), false},
+		{"an each.value index", scope(`azurerm_key_vault.kv[each.value].id`), false},
+		{"a count index", scope(`azurerm_key_vault.kv[count.index].id`), false},
+		{"a splat", scope(`azurerm_key_vault.kv[*].id`), false},
+		{"two indexes", scope(`azurerm_key_vault.kv[0][1].id`), false},
+		{"an expression", scope(`azurerm_key_vault.kv.id != "" ? var.a : var.b`), false},
+		{"a multi-line value", block(role, `  scope = (`, `    azurerm_key_vault.kv.id`, `  )`), false},
+		{"no scope", block(role), false},
+		{"a nested scope beside a resource group", block(role, `  scope = azurerm_resource_group.g.id`, `  nested {`, `    scope = azurerm_key_vault.kv.id`, `  }`), false},
+		{"another type", block("azurerm_role_definition", `  scope = azurerm_key_vault.kv.id`), false},
+	} {
+		lines := terraformBlocks([]byte(strings.Join(tt.src, "\n")))
+		for i := range lines {
+			if got := oneResource(lines, tt.src, i); got != tt.want {
+				t.Errorf("%s: line %d %q: oneResource = %v, want %v", tt.name, i+1, tt.src[i], got, tt.want)
+			}
+		}
+	}
+
+	first, second := scope(`azurerm_key_vault.kv.id`), scope(`azurerm_resource_group.g.id`)
+	src := append(append(first, second...), `# after`)
+	lines := terraformBlocks([]byte(strings.Join(src, "\n")))
+	for i := range lines {
+		if got, want := oneResource(lines, src, i), i < len(first); got != want {
+			t.Errorf("adjacent blocks: line %d %q: oneResource = %v, want %v", i+1, src[i], got, want)
+		}
+	}
+}
+
 // TestCreated pins the blocks that only create an identity: a new resource
 // block of azuread_application or azuread_service_principal, every line
 // added, that holds nothing. Its lines carry identity_rights but never
@@ -622,6 +687,9 @@ func TestReadmeListsConsequences(t *testing.T) {
 		}
 		for typ, attrs := range c.creates {
 			names = append(append(names, typ), attrs...)
+		}
+		for typ, rs := range c.oneResource {
+			names = append(append(names, typ, rs.attr), rs.containers...)
 		}
 		for typ, attrs := range c.attributes {
 			names = append(names, typ)
