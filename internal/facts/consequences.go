@@ -165,9 +165,13 @@ var builtinConsequences = []struct {
 		"azuredevops_resource_authorization",
 		"azuredevops_securityrole_assignment",
 		"azuredevops_serviceendpoint_*",
+		"azurerm_*_active_directory_administrator",
 		"azurerm_federated_identity_credential",
+		"azurerm_kusto_*_principal_assignment",
 		"azurerm_role_assignment",
 		"azurerm_role_definition",
+		"azurerm_synapse_workspace_aad_admin",
+		"azurerm_synapse_workspace_sql_aad_admin",
 		"azurerm_user_assigned_identity",
 		"github_actions_*_oidc_subject_claim_customization_template",
 		"github_actions_*_permissions",
@@ -184,6 +188,9 @@ var builtinConsequences = []struct {
 	}, attributes: map[string][]string{
 		// who is in a group decides who holds the roles granted to it
 		"azuread_group": {"members", "owners"},
+		// who administers a database server holds rights over its data
+		"azurerm_mssql_managed_instance": {"azure_active_directory_administrator"},
+		"azurerm_mssql_server":           {"azuread_administrator"},
 	}},
 	{class: ConsequencePipelineIdentity, keys: []string{
 		"*serviceConnection", "azureSubscription*", "connectedServiceName*",

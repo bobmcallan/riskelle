@@ -465,6 +465,11 @@ func TestIdentityRightsCatalog(t *testing.T) {
 		"azuread_service_principal", "azuread_service_principal_password",
 		"azurerm_federated_identity_credential", "azurerm_role_assignment",
 		"azurerm_role_definition", "azurerm_user_assigned_identity",
+		"azurerm_postgresql_active_directory_administrator", "azurerm_postgresql_flexible_server_active_directory_administrator",
+		"azurerm_mysql_active_directory_administrator", "azurerm_mysql_flexible_server_active_directory_administrator",
+		"azurerm_sql_active_directory_administrator", "azurerm_mssql_managed_instance_active_directory_administrator",
+		"azurerm_synapse_workspace_aad_admin", "azurerm_synapse_workspace_sql_aad_admin",
+		"azurerm_kusto_cluster_principal_assignment", "azurerm_kusto_database_principal_assignment",
 		"google_project_iam_member", "google_storage_bucket_iam_binding",
 		// delivery rights: Azure DevOps
 		"azuredevops_serviceendpoint_azurerm", "azuredevops_serviceendpoint_github", "azuredevops_serviceendpoint_permissions",
@@ -492,7 +497,8 @@ func TestIdentityRightsCatalog(t *testing.T) {
 			t.Errorf("consequencesOf(%q) = %v, want [identity_rights]", typ, got)
 		}
 	}
-	for _, typ := range []string{"azurerm_storage_account", "azuread_group", "google_iam_workload_identity_pool", "aws_s3_bucket", "",
+	for _, typ := range []string{"azurerm_mssql_server", "azurerm_mssql_managed_instance", "azurerm_postgresql_flexible_server",
+		"azurerm_synapse_workspace", "azurerm_kusto_cluster", "azurerm_storage_account", "azuread_group", "google_iam_workload_identity_pool", "aws_s3_bucket", "",
 		"azuredevops_git_repository", "azuredevops_project", "azuredevops_build_definition", "azuredevops_variable_group",
 		"github_repository", "github_repository_file", "github_team", "github_actions_secret", "github_actions_variable",
 		// not a provider type: pins the literal customization_template suffix
@@ -513,6 +519,10 @@ func TestIdentityRightsCatalog(t *testing.T) {
 		{"azuread_group", "lifecycle", nil},
 		{"azuread_group", "", nil},
 		{"azurerm_role_assignment", "members", nil},
+		{"azurerm_mssql_server", "azuread_administrator", []string{ConsequenceIdentityRights}},
+		{"azurerm_mssql_managed_instance", "azure_active_directory_administrator", []string{ConsequenceIdentityRights}},
+		{"azurerm_mssql_server", "minimum_tls_version", nil},
+		{"azurerm_mssql_managed_instance", "azuread_administrator", nil},
 	} {
 		if got := attributeConsequencesOf(tt.typ, tt.attr); !reflect.DeepEqual(got, tt.want) {
 			t.Errorf("attributeConsequencesOf(%q, %q) = %v, want %v", tt.typ, tt.attr, got, tt.want)
