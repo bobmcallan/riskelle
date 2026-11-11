@@ -144,7 +144,7 @@ or absolute glob are refused by name: a repo class can only raise the level.
 
 | Class | Floor | Read from |
 | --- | --- | --- |
-| `access_widened` | High | A line added at head that carries `identity_rights` outside a delivery gate: a grant of identity rights added or altered, a variable it uses included; the same paths and types. Never a removed line, a delivery-gate line, a `description` or `display_name` label, or a line that changed only in whitespace or a comment |
+| `access_widened` | High | A line added at head that carries `identity_rights` outside a delivery gate: a grant of identity rights added or altered, a variable it uses included; the same paths and types. Never a removed line, a delivery-gate line, a `description` or `display_name` label, a line of a new `azuread_application` or `azuread_service_principal` that holds nothing, or a line that changed only in whitespace or a comment |
 | `definition_update` | Medium | Added lines of any text file but docs and tests (class `test`): a logical shell command that is `az devops invoke` with `--area release` or `build`, `--resource definitions` and an `--http-method` of `PUT` or `PATCH`; `az pipelines` directly followed by `update`; or `curl`, `az rest` or `Invoke-RestMethod` with `PUT` or `PATCH` against a URL containing `_apis/release/definitions` or `_apis/build/definitions` |
 | `definition_write` | High | Added lines of any text file but docs and tests (class `test`): every other write by the same commands. `az devops invoke` with `--area release` or `build` and an `--http-method` of `POST` or `DELETE`, or of `PUT` or `PATCH` with a `--resource` other than `definitions` or none; `az pipelines` directly followed by `create` or `delete`; `az pipelines release` directly followed by `create`, `update` or `delete`; or `curl`, `az rest` or `Invoke-RestMethod` with `POST` or `DELETE` against a URL containing `_apis/release/definitions` or `_apis/build/definitions` |
 | `destructive_migration` | High | Added lines of an EF Core migration (`**/Migrations/**/*.cs`): the `migrationBuilder` calls `DeleteData`, `DropColumn`, `DropSchema`, `DropTable`, `RenameColumn`, `RenameTable`; added lines of a migration or a `.sql` file: `DROP TABLE`, `DROP COLUMN`, `DROP SCHEMA`, `DROP DATABASE`, `DROP VIEW`, `TRUNCATE`, `DELETE FROM`, `ALTER TABLE DROP` (`ALTER TABLE ... DROP`) |
@@ -229,6 +229,23 @@ or absolute glob are refused by name: a repo class can only raise the level.
   string: any other scope (a service connection, a library, an agent pool, a
   project), or one given as a variable, a local or an expression, stays
   `access_widened`. Which role or permission is granted is not read.
+- Creating an identity is not a grant. A new `azuread_application` or
+  `azuread_service_principal` resource block (those exact types) that holds
+  nothing carries `identity_rights` (Medium) but never `access_widened`: its
+  rights arrive in a block of another type (a role assignment, an app role
+  assignment, a permission grant, a directory role, a membership), which is
+  `access_widened` in whichever change adds it, and a revert of the merge
+  removes the empty identity. The block must be new, every line of it added,
+  with no `dynamic` block, and without `required_resource_access` (a
+  permission request) or `password` (a credential) in an application, or
+  `use_existing` (it adopts a principal that already exists) in a service
+  principal, whatever the value. A changed line in an existing block, a
+  renamed block, a `data` block and a variable the block uses stay
+  `access_widened`. So does every credential, such as
+  `azuread_application_certificate`, wherever a line of its block is added:
+  `for_each` and `fileset` are not evaluated, so a certificate resource with
+  no instance yet reads the same as one with many. Put it in the change that
+  enrols the first certificate.
 - A restyle is not a change. In a `.tf` or `.tfvars` file, a removed line and
   a later added line of the same hunk that differ only in whitespace outside
   a string or in a trailing `#` or `//` comment are the same line, as when
@@ -621,7 +638,9 @@ a JSON plan file that predicts the change:
   [Consequences](#consequences). A planned `PUT` or `PATCH` of an existing
   release or build definition names `definition_update`, and any other
   planned definition write names `definition_write`. A planned path that adds or alters a grant
-  names both, `"consequences": ["identity_rights", "access_widened"]`. A
+  names both, `"consequences": ["identity_rights", "access_widened"]`; one
+  that only creates an identity that holds nothing names `identity_rights`
+  alone. A
   planned change to a pipeline that deploys to production names
   `"production_deploy"`, and a planned path that removes a stateful resource
   names `stateful_destroy`. An

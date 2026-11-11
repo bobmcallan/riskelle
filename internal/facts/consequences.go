@@ -71,6 +71,17 @@ type Consequence struct {
 // do (service connections, other permissions, memberships, role assignments)
 // is a grant and widens.
 //
+// Creating an identity that holds nothing is not a grant either (creates): a
+// new resource block of one of those exact types, every line of it added at
+// head, with none of the listed attributes (a permission request, a
+// credential, the adoption of a principal that already exists) and no dynamic
+// block, carries identity_rights alone. Its rights arrive in a block of
+// another type, which widens in whichever change adds it, so splitting cannot
+// lower the floor, and a revert of the merge removes the empty identity. A
+// credential stays a grant: azuread_application_certificate, the password
+// types and a federated credential widen wherever a line of theirs is added,
+// whatever for_each gives them, since no expression is evaluated.
+//
 // definition_update is a script that updates an existing release or build
 // definition out of band, with a PUT or PATCH: the service keeps every
 // revision, so restoring the prior one puts a failed update right.
@@ -99,6 +110,7 @@ var builtinConsequences = []struct {
 	labels     []string             // the top-level attributes on whose lines a widening class does not accompany
 	gates      []string             // the block types whose lines a widening class does not accompany: delivery gates
 	gateWhen   map[string][2]string // exact type: the top-level attribute and the literal value it must hold for the block to be a delivery gate
+	creates    map[string][]string  // exact resource type: the top-level attributes that give a new block something; a new block with none of them does not carry a widening class
 	removed    []string             // resource types whose block removed from its directory carries the class
 	secrets    []secretRule         // the rules whose match on a line added at head carries the class
 }{
@@ -118,6 +130,11 @@ var builtinConsequences = []struct {
 		// a role on one environment, not on a service connection, a
 		// library, an agent pool or a project
 		"azuredevops_securityrole_assignment": {"scope", "distributedtask.environmentreferencerole"},
+	}, creates: map[string][]string{
+		// a permission request and a credential
+		"azuread_application": {"password", "required_resource_access"},
+		// it adopts a principal that already exists and may hold rights
+		"azuread_service_principal": {"use_existing"},
 	}},
 	{class: ConsequenceDefinitionUpdate, commands: []string{
 		"az devops invoke", "az pipelines", "az rest", "curl", "Invoke-RestMethod",
@@ -306,6 +323,39 @@ func scopedGate(lines []tfLine, text []string, i int) bool {
 // it is in: a delivery gate by type (gate) or by an attribute (scopedGate).
 func inGate(lines []tfLine, text []string, i int) bool {
 	return gate(lines[i].block) || scopedGate(lines, text, i)
+}
+
+// created reports whether line i cannot widen its class because its block
+// only creates an identity that holds nothing: a resource block (never a data
+// block) of a type the catalog lists by its exact name (creates), new at head
+// (added holds the 1-based lines added there, and every line of the block but
+// an inert one and its closing "}" is among them, so a renamed or altered
+// block is not new), with none of the type's listed attributes and no dynamic
+// block, which could generate one. An attribute counts whatever its value.
+// A block written on one line is not read, so it is never one.
+func created(lines []tfLine, added map[int]bool, i int) bool {
+	l := lines[i]
+	if l.start == 0 || l.data {
+		return false
+	}
+	for _, c := range builtinConsequences {
+		attrs, ok := c.creates[l.block]
+		if !ok {
+			continue
+		}
+		j := l.start - 1
+		for ; j < len(lines) && lines[j].start == l.start; j++ {
+			if lines[j].attr == "dynamic" || slices.Contains(attrs, lines[j].attr) {
+				return false
+			}
+			closing := j > l.start-1 && lines[j].attr == "" && !lines[j].inert
+			if !added[j+1] && !lines[j].inert && !closing {
+				return false
+			}
+		}
+		return j > l.start // a one-line block's attributes are not read
+	}
+	return false
 }
 
 // hclComment reports whether a line, less its leading whitespace, is a
@@ -699,8 +749,9 @@ func filePatch(ctx context.Context, repo, mergeBase, head string, f File) ([]byt
 // A class read on a line added at head (an altered line is one removed and
 // one added) also adds each class that widens it, access_widened for
 // identity_rights, with the same path and type; the merge-base side adds
-// none, and neither does a line in a label attribute (label) or in a
-// delivery gate (gate). In a .tf or
+// none, and neither does a line in a label attribute (label), in a
+// delivery gate (gate) or in a new block that only creates an identity
+// (created). In a .tf or
 // .tfvars file a restyled line (restyledLines) is not a changed line at
 // either side, and an inert one (blank or a full-line comment) carries no
 // class and sets no variable. A catalogued resource block whose address leaves its directory adds
@@ -856,6 +907,12 @@ func collectConsequences(ctx context.Context, repo, mergeBase, head string, file
 				return
 			}
 			lines, text := terraformBlocks(content), strings.Split(string(content), "\n")
+			added := map[int]bool{}
+			if at.added {
+				for _, n := range want[p] {
+					added[n] = true
+				}
+			}
 			for _, n := range want[p] {
 				if n < 1 || n > len(lines) {
 					continue
@@ -870,7 +927,7 @@ func collectConsequences(ctx context.Context, repo, mergeBase, head string, file
 				if l.block == "" {
 					continue
 				}
-				widen := at.added && !label(l) && !inGate(lines, text, n-1)
+				widen := at.added && !label(l) && !inGate(lines, text, n-1) && !created(lines, added, n-1)
 				for _, class := range consequencesOf(l.block) {
 					hit(class, p, l.block, widen)
 				}

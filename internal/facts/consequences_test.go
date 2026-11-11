@@ -257,6 +257,87 @@ func TestScopedGate(t *testing.T) {
 	}
 }
 
+// TestCreated pins the blocks that only create an identity: a new resource
+// block of azuread_application or azuread_service_principal, every line
+// added, that holds nothing. Its lines carry identity_rights but never
+// access_widened.
+func TestCreated(t *testing.T) {
+	app := func(body ...string) []string {
+		src := []string{`resource "azuread_application" "agent" {`, `  for_each = local.agents`, ``,
+			`  display_name     = "agent-${each.key}"`, `  sign_in_audience = "AzureADMyOrg"`,
+			`  owners           = var.owner_object_ids`, `  tags             = ["a"]`}
+		return append(append(src, body...), `}`)
+	}
+	sp := func(header string, body ...string) []string {
+		src := []string{header, `  for_each = local.agents`, `  # the application's principal`,
+			`  client_id = azuread_application.agent[each.key].client_id`, `  owners    = var.owner_object_ids`}
+		return append(append(src, body...), `}`)
+	}
+	other := func(typ string) []string {
+		return []string{`resource "` + typ + `" "x" {`, `  application_id = azuread_application.agent.id`, `}`}
+	}
+	const principal = `resource "azuread_service_principal" "agent" {`
+	all := func(src []string) map[int]bool {
+		added := map[int]bool{}
+		for i := range src {
+			added[i+1] = true
+		}
+		return added
+	}
+	less := func(src []string, drop ...int) map[int]bool {
+		added := all(src)
+		for _, n := range drop {
+			delete(added, n)
+		}
+		return added
+	}
+	for _, tt := range []struct {
+		name  string
+		src   []string
+		added map[int]bool
+		want  bool
+	}{
+		{"a new application", app(), nil, true},
+		{"a new service principal", sp(principal), nil, true},
+		{"a one-line block", []string{`resource "azuread_application" "a" { display_name = "a" }`}, nil, false}, // it opens no block
+		{"blank, comment and closing lines not added", sp(principal), less(sp(principal), 3, 6), true},
+		{"a permission request", app(`  required_resource_access {`, `    resource_app_id = "x"`, `  }`), nil, false},
+		{"a credential", app(`  password {`, `    display_name = "p"`, `  }`), nil, false},
+		{"a dynamic block", app(`  dynamic "required_resource_access" {`, `    for_each = local.access`, `    content {}`, `  }`), nil, false},
+		{"an adopted principal", sp(principal, `  use_existing = true`), nil, false},
+		{"use_existing, whatever its value", sp(principal, `  use_existing = false`), nil, false},
+		{"a data block", sp(`data "azuread_service_principal" "agent" {`), nil, false},
+		{"the header not added", app(), less(app(), 1), false},
+		{"one body line not added", app(), less(app(), 6), false},
+		{"a certificate", other("azuread_application_certificate"), nil, false},
+		{"an application password", other("azuread_application_password"), nil, false},
+		{"a federated credential", other("azuread_application_federated_identity_credential"), nil, false},
+		{"a registration", other("azuread_application_registration"), nil, false},
+		{"a service principal password", other("azuread_service_principal_password"), nil, false},
+		{"a role assignment", other("azurerm_role_assignment"), nil, false},
+	} {
+		added := tt.added
+		if added == nil {
+			added = all(tt.src)
+		}
+		lines := terraformBlocks([]byte(strings.Join(tt.src, "\n")))
+		for i := range lines {
+			if got := created(lines, added, i); got != tt.want {
+				t.Errorf("%s: line %d %q: created = %v, want %v", tt.name, i+1, tt.src[i], got, tt.want)
+			}
+		}
+	}
+
+	first, second := app(), app(`  password {}`)
+	src := append(append(first, second...), `# after`)
+	lines := terraformBlocks([]byte(strings.Join(src, "\n")))
+	for i := range lines {
+		if got, want := created(lines, all(src), i), i < len(first); got != want {
+			t.Errorf("adjacent blocks: line %d %q: created = %v, want %v", i+1, src[i], got, want)
+		}
+	}
+}
+
 // TestGate pins the delivery gates, whose lines carry identity_rights but
 // never the class that widens it, and the identity types beside them, which
 // still widen: every permissions type but the one listed by its exact name.
@@ -528,6 +609,9 @@ func TestReadmeListsConsequences(t *testing.T) {
 		}
 		for typ, when := range c.gateWhen {
 			names = append(names, typ, when[0], `"`+when[1]+`"`)
+		}
+		for typ, attrs := range c.creates {
+			names = append(append(names, typ), attrs...)
 		}
 		for typ, attrs := range c.attributes {
 			names = append(names, typ)
