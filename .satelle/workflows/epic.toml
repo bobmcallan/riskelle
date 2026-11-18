@@ -22,11 +22,11 @@ skill = "riskelle-children-closed-check"
 
 [gates.blocked-review]
 skill = "riskelle-blocked-review"
-agent = "reviewer-alt"
+agent = "reviewer"
 
 [gates.cancel-review]
 skill = "riskelle-cancel-review"
-agent = "reviewer-alt"
+agent = "reviewer"
 
 [[transition]]
 from = ["backlog"]

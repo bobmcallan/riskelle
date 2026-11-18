@@ -34,7 +34,7 @@ carry = true
 
 [gates.code-review]
 skill = "riskelle-code-review"
-agent = "reviewer-alt"
+agent = "reviewer"
 carry = true
 
 [gates.integration-check]
@@ -57,11 +57,11 @@ skill = "riskelle-release-installed-check"
 
 [gates.blocked-review]
 skill = "riskelle-blocked-review"
-agent = "reviewer-alt"
+agent = "reviewer"
 
 [gates.cancel-review]
 skill = "riskelle-cancel-review"
-agent = "reviewer-alt"
+agent = "reviewer"
 
 [[transition]]
 from = ["backlog"]

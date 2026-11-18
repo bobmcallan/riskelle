@@ -20,7 +20,7 @@ skill = "riskelle-task-validate-before-check"
 
 [gates.validate-after]
 skill = "riskelle-task-validate-after-review"
-agent = "reviewer-alt"
+agent = "reviewer"
 
 [[transition]]
 from = ["backlog"]

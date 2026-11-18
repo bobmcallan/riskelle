@@ -35,8 +35,7 @@ terminal = true
 
 [gates.plan-review]
 skill = "riskelle-plan-review"
-panel = ["reviewer-alt", "reviewer-grok"]
-combine = "all"
+agent = "reviewer"
 carry = true
 
 # riskelle scores its own stories: the estimate entering in_progress (a High is
@@ -57,7 +56,7 @@ carry = true
 
 [gates.code-review]
 skill = "riskelle-code-review"
-agent = "reviewer-alt"
+agent = "reviewer"
 carry = true
 
 # The full local suite, once, on the head that will be released.
@@ -80,11 +79,11 @@ skill = "riskelle-release-installed-check"
 
 [gates.blocked-review]
 skill = "riskelle-blocked-review"
-agent = "reviewer-alt"
+agent = "reviewer"
 
 [gates.cancel-review]
 skill = "riskelle-cancel-review"
-agent = "reviewer-alt"
+agent = "reviewer"
 
 # ---- transitions ----
 
