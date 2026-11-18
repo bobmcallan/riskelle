@@ -28,6 +28,3 @@ edit_exempt_paths = [".satelle/**", ".claude/**", ".grok/**", ".pi/**", ".gitign
 [hook]
 # Printed at session start.
 inject = [".satelle/constitution.md"]
-
-[rules]
-reviewer_differs_from_performer = true
