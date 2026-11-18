@@ -13,7 +13,8 @@ tag, or present `done` yourself.
 ## 0. The released riskelle
 
 riskelle scores its own items with the **installed, released** riskelle on the
-PATH, never one built from the branch. It must be at least v0.19.0:
+PATH, never one built from the branch, no older than the minimum this check
+names:
 
 ```bash
 printf 'v0.19.0\n%s\n' "$(riskelle version | cut -d' ' -f2)" | sort -V -C && echo ok
